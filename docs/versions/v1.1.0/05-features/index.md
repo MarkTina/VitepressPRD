@@ -56,8 +56,8 @@ graph TD
     Config --> WxDirect
     Config --> AliDirect
 
-    Site -->|绑定微信+支付宝配置| Config
-    Order -->|用户选微信支付| WxSplit
-    Order -->|用户选微信支付| WxDirect
-    Order -->|用户选支付宝| AliDirect
+    Site -->|绑定微信和支付宝配置| Config
+    Order -->|微信小程序内支付| WxSplit
+    Order -->|微信小程序内支付| WxDirect
+    Order -->|支付宝小程序内支付| AliDirect
 ```

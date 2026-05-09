@@ -38,25 +38,25 @@ sequenceDiagram
     end
 ```
 
-## 支付模式选择流程
+## 支付路由流程（根据小程序平台）
 
 ```mermaid
 graph TD
-    Start([用户发起支付]) --> UserChoice{用户选择支付方式}
+    Start([用户扫码]) --> Platform{用户所在平台}
 
-    UserChoice -->|微信支付| GetWxConfig[获取网点绑定的微信配置]
-    UserChoice -->|支付宝| GetAliConfig[获取网点绑定的支付宝配置]
+    Platform -->|微信小程序| WxFetch[前端获取网点微信配置]
+    Platform -->|支付宝小程序| AliFetch[前端获取网点支付宝配置]
 
-    GetAliConfig --> AliCheck{支付宝配置存在?}
-    AliCheck -->|否| PayFail([提示暂不支持支付宝])
-    AliCheck -->|是| AliPay[调用支付宝<br/>当面付/APP 支付]
-
-    GetWxConfig --> WxCheck{微信配置存在?}
-    WxCheck -->|否| PayFailWx([提示暂不支持微信支付])
+    WxFetch --> WxCheck{微信配置存在?}
+    WxCheck -->|否| WxFail([提示暂不支持微信支付])
     WxCheck -->|是| WxModeSwitch{微信配置模式}
 
     WxModeSwitch -->|服务商分账| WxSplitPay[调用微信服务商支付<br/>携带分账标记]
     WxModeSwitch -->|服务商直收| WxDirectPay[调用微信服务商支付<br/>子商户直接收款]
+
+    AliFetch --> AliCheck{支付宝配置存在?}
+    AliCheck -->|否| AliFail([提示暂不支持支付宝])
+    AliCheck -->|是| AliPay[调用支付宝<br/>当面付/APP 支付]
 
     WxSplitPay --> PayResult{支付结果}
     WxDirectPay --> PayResult
@@ -106,7 +106,7 @@ sequenceDiagram
 
     PayGW->>Redis: 查询网点微信+支付宝配置
     Redis-->>PayGW: 返回绑定的微信配置和支付宝配置
-    PayGW->>PayGW: 根据用户选择的支付方式<br/>路由到对应渠道
+    PayGW->>PayGW: 根据请求来源小程序平台<br/>路由到对应支付渠道
 
     Admin->>Backend: 更换网点微信配置
     Backend->>Backend: 校验新配置(channel=wechat)

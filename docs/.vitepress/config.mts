@@ -73,13 +73,27 @@ function generateVersionSidebar(version: string) {
       if (fs.existsSync(featuresDir)) {
         const featureFiles = fs.readdirSync(featuresDir)
           .filter(f => f.endsWith('.md'))
-          .sort()
+          .sort((a, b) => {
+            if (a === 'index.md') return -1
+            if (b === 'index.md') return 1
+            return a.localeCompare(b)
+          })
 
         if (featureFiles.length > 0) {
-          const featureItems = featureFiles.map(f => ({
-            text: f === 'index.md' ? '功能模块总览' : f.replace('.md', ''),
-            link: `/versions/${version}/05-features/${f.replace('.md', '')}`
-          }))
+          const featureItems = featureFiles.map(f => {
+            let text = f.replace('.md', '')
+            if (f === 'index.md') {
+              text = '功能模块总览'
+            } else {
+              // 读取文件第一个 # 标题作为显示名
+              try {
+                const content = fs.readFileSync(path.join(featuresDir, f), 'utf-8')
+                const match = content.match(/^# (.+)$/m)
+                if (match) text = match[1]
+              } catch (_) { /* fallback to filename */ }
+            }
+            return { text, link: `/versions/${version}/05-features/${f.replace('.md', '')}` }
+          })
 
           sidebar.push({
             text: '5. 功能模块',

@@ -287,7 +287,7 @@ version: v1.1.0
 
 ### POST /api/v1/payment/order
 
-**描述：** 发起支付。根据用户选择的支付渠道和网点绑定的配置，自动路由到对应支付渠道。
+**描述：** 发起支付。前端根据所在小程序平台（微信/支付宝）传入对应渠道标识，后端根据渠道和网点绑定的配置自动路由到对应支付渠道。
 
 **请求体：**
 
@@ -304,7 +304,7 @@ version: v1.1.0
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | site_id | string | 是 | 洗衣网点 ID |
-| channel | enum | 是 | 支付渠道：wechat / alipay |
+| channel | enum | 是 | 支付渠道：wechat / alipay（由前端根据所在小程序平台传入） |
 | amount | decimal | 是 | 支付金额（元） |
 | description | string | 是 | 商品描述 |
 | notify_url | string | 否 | 支付结果回调地址 |
