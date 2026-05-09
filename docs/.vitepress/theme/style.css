@@ -1,0 +1,223 @@
+/* PRD 脚手架自定义样式 */
+
+/* 覆盖 VitePress 默认变量 */
+:root {
+  --vp-c-brand: #3b82f6;
+  --vp-c-brand-light: #60a5fa;
+  --vp-c-brand-lighter: #93c5fd;
+  --vp-c-brand-dark: #2563eb;
+  --vp-c-brand-darker: #1d4ed8;
+  --vp-c-bg-soft: #f8fafc;
+}
+
+.dark {
+  --vp-c-bg-soft: #1e293b;
+}
+
+/* PRD 元信息卡片样式增强 */
+.prd-meta {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* 需求卡片样式 */
+.requirement-card {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+  background: var(--vp-c-bg);
+  transition: box-shadow 0.2s;
+}
+
+.requirement-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.requirement-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.requirement-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  flex: 1;
+}
+
+.requirement-card-priority {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.priority-p0 {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.priority-p1 {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.priority-p2 {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* 表格样式优化 */
+.vp-doc table {
+  font-size: 14px;
+}
+
+.vp-doc th {
+  background: var(--vp-c-bg-soft);
+  font-weight: 600;
+}
+
+/* Mermaid 图表容器 */
+.mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+/* 版本选择器在导航栏的样式 */
+.VPNavBar .VPNavBarMenu {
+  display: flex;
+  align-items: center;
+}
+
+/* 首页样式 */
+.prd-home {
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.prd-home-title {
+  font-size: 36px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, var(--vp-c-brand) 0%, var(--vp-c-brand-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.prd-home-subtitle {
+  font-size: 18px;
+  color: var(--vp-c-text-2);
+  margin-bottom: 32px;
+}
+
+.prd-home-versions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.prd-home-version-card {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  padding: 24px;
+  background: var(--vp-c-bg);
+  transition: all 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+
+.prd-home-version-card:hover {
+  border-color: var(--vp-c-brand);
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.1);
+}
+
+.prd-home-version-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.prd-home-version-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.prd-home-version-desc {
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+  margin-bottom: 12px;
+}
+
+.prd-home-version-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+}
+
+/* 变更日志样式 */
+.changelog {
+  margin: 16px 0;
+}
+
+.changelog-item {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.changelog-item:last-child {
+  border-bottom: none;
+}
+
+.changelog-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  min-width: 56px;
+  text-align: center;
+}
+
+.changelog-type-feature {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.changelog-type-fix {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.changelog-type-improve {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.changelog-content {
+  flex: 1;
+  font-size: 14px;
+}
+
+/* 响应式优化 */
+@media (max-width: 768px) {
+  .prd-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .prd-home-title {
+    font-size: 28px;
+  }
+
+  .prd-home-versions {
+    grid-template-columns: 1fr;
+  }
+}

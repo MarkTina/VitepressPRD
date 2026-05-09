@@ -1,0 +1,28 @@
+{
+  "name": "vitepress-prd-scaffold",
+  "version": "1.0.0",
+  "description": "基于 VitePress 的高质量 PRD 文档脚手架",
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "new-version": "node scripts/new-version.js",
+    "new-feature": "node scripts/new-feature.js"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3",
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "mermaid": "^11.6.0",
+    "vue": "^3.5.13"
+  },
+  "keywords": [
+    "vitepress",
+    "prd",
+    "product-requirements",
+    "documentation",
+    "scaffold"
+  ],
+  "author": "",
+  "license": "MIT"
+}
