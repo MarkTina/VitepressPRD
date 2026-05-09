@@ -231,7 +231,7 @@ version: v1.1.0
 
 ### POST /api/v1/sites/{site_id}/payment-binding
 
-**描述：** 为网点绑定支付配置
+**描述：** 为网点绑定支付配置。系统根据 config_id 对应的支付模式自动识别渠道（微信类为 wechat，支付宝类为 alipay），同一渠道重复绑定会替换旧配置。
 
 **请求体：**
 
@@ -241,9 +241,11 @@ version: v1.1.0
 }
 ```
 
+**校验规则：** 微信渠道（wechat_split / wechat_direct）最多绑定一个，支付宝渠道（alipay_direct）最多绑定一个。
+
 ### GET /api/v1/sites/{site_id}/payment-binding
 
-**描述：** 查询网点当前支付配置绑定
+**描述：** 查询网点当前支付配置绑定（微信 + 支付宝）
 
 **响应：**
 
@@ -251,15 +253,32 @@ version: v1.1.0
 {
   "code": 0,
   "data": {
-    "binding_id": "BIND_001",
-    "site_id": "SITE_001",
-    "config_id": "CFG_20260510_001",
-    "config_name": "华北区-微信分账-标准佣金",
-    "mode": "wechat_split",
-    "bound_at": "2026-05-10T10:30:00Z"
+    "bindings": [
+      {
+        "binding_id": "BIND_001",
+        "channel": "wechat",
+        "config_id": "CFG_20260510_001",
+        "config_name": "华北区-微信分账-标准佣金",
+        "mode": "wechat_split",
+        "bound_at": "2026-05-10T10:30:00Z"
+      },
+      {
+        "binding_id": "BIND_002",
+        "channel": "alipay",
+        "config_id": "CFG_20260510_002",
+        "config_name": "华北区-支付宝直收",
+        "mode": "alipay_direct",
+        "bound_at": "2026-05-10T10:31:00Z"
+      }
+    ]
   },
   "message": "success"
 }
+```
+
+### DELETE /api/v1/sites/{site_id}/payment-binding/{binding_id}
+
+**描述：** 解绑网点指定支付配置（按 binding_id 删除，不影响其他渠道的绑定）
 ```
 
 ---
@@ -268,18 +287,29 @@ version: v1.1.0
 
 ### POST /api/v1/payment/order
 
-**描述：** 发起支付（根据网点绑定的配置自动路由到对应支付渠道）
+**描述：** 发起支付。根据用户选择的支付渠道和网点绑定的配置，自动路由到对应支付渠道。
 
 **请求体：**
 
 ```json
 {
   "site_id": "SITE_001",
+  "channel": "wechat",
   "amount": 20.00,
   "description": "自助洗衣-标准洗-30分钟",
   "notify_url": "https://laundry.example.com/pay/callback"
 }
 ```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| site_id | string | 是 | 洗衣网点 ID |
+| channel | enum | 是 | 支付渠道：wechat / alipay |
+| amount | decimal | 是 | 支付金额（元） |
+| description | string | 是 | 商品描述 |
+| notify_url | string | 否 | 支付结果回调地址 |
+
+**校验规则：** 若 `channel=alipay` 但网点未绑定支付宝配置，返回错误码 400 并提示「该网点暂不支持支付宝支付」。
 
 **响应：**
 

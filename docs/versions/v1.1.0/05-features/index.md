@@ -14,7 +14,7 @@ version: v1.1.0
 | F-203 | 微信服务商直收 | P0 | 草稿 | 服务商模式微信直接收款（不分账） |
 | F-204 | 支付宝直接收款 | P1 | 草稿 | 支付宝直接收款，独立于微信支付 |
 
-## 功能依赖关系
+## 短信微服务依赖关系
 
 ```mermaid
 graph TD
@@ -22,24 +22,43 @@ graph TD
         F101[F-101 短信微服务]
     end
 
-    subgraph 支付架构重构
+    subgraph 平台业务
+        Express[快递业务]
+        Laundry[洗衣业务]
+        UserCenter[用户中心]
+    end
+
+    Express -->|调用短信 API| F101
+    Laundry -->|调用短信 API| F101
+    UserCenter -->|调用短信 API| F101
+```
+
+## 支付架构依赖关系
+
+```mermaid
+graph TD
+    subgraph 支付配置中心
         F201[F-201 支付配置中心]
+    end
+
+    subgraph 支付模式
         F202[F-202 微信服务商分账]
         F203[F-203 微信服务商直收]
         F204[F-204 支付宝直接收款]
+    end
+
+    subgraph 洗衣业务
+        Order[自助洗衣订单]
+        Site[洗衣网点]
     end
 
     F201 --> F202
     F201 --> F203
     F201 --> F204
 
-    subgraph 洗衣业务
-        Laundry[自助洗衣订单]
-    end
-
-    F101 -.->|异步通知| Laundry
-    Laundry --> F201
-    F201 -->|路由| F202
-    F201 -->|路由| F203
-    F201 -->|路由| F204
+    Site -->|绑定微信+支付宝配置| F201
+    Order -->|根据支付方式路由| F201
+    F201 -->|微信支付| F202
+    F201 -->|微信支付| F203
+    F201 -->|支付宝支付| F204
 ```

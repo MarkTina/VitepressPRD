@@ -77,6 +77,7 @@ erDiagram
         string binding_id PK
         string site_id FK
         string config_id FK
+        string channel
         datetime bound_at
         string bound_by
     }
@@ -225,8 +226,11 @@ erDiagram
 | binding_id | string(32) | 是 | 主键 |
 | site_id | string(32) | 是 | 外键，洗衣网点 ID |
 | config_id | string(32) | 是 | 外键，关联支付配置 |
+| channel | enum | 是 | 支付渠道：wechat / alipay |
 | bound_at | datetime | 是 | 绑定时间 |
 | bound_by | string(32) | 是 | 操作人 |
+
+**唯一约束：** `site_id + channel` 联合唯一。同一网点同一渠道只能有一个绑定。即一个网点最多存在一条 `channel=wechat` 的记录和一条 `channel=alipay` 的记录。
 
 ### PROFIT_SHARING_RULE（分账规则）
 

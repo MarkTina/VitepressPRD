@@ -42,19 +42,30 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    Start([用户发起支付]) --> GetConfig[获取网点绑定的支付配置]
-    GetConfig --> ModeSwitch{支付模式}
+    Start([用户发起支付]) --> UserChoice{用户选择支付方式}
 
-    ModeSwitch -->|微信服务商分账| WxSplitPay[调用微信服务商支付<br/>携带分账标记]
-    ModeSwitch -->|微信服务商直收| WxDirectPay[调用微信服务商支付<br/>子商户直接收款]
-    ModeSwitch -->|支付宝直收| AliPay[调用支付宝<br/>当面付/APP 支付]
+    UserChoice -->|微信支付| GetWxConfig[获取网点绑定的微信配置]
+    UserChoice -->|支付宝| GetAliConfig[获取网点绑定的支付宝配置]
+
+    GetAliConfig --> AliCheck{支付宝配置存在?}
+    AliCheck -->|否| PayFail([提示暂不支持支付宝])
+    AliCheck -->|是| AliPay[调用支付宝<br/>当面付/APP 支付]
+
+    GetWxConfig --> WxCheck{微信配置存在?}
+    WxCheck -->|否| PayFailWx([提示暂不支持微信支付])
+    WxCheck -->|是| WxModeSwitch{微信配置模式}
+
+    WxModeSwitch -->|服务商分账| WxSplitPay[调用微信服务商支付<br/>携带分账标记]
+    WxModeSwitch -->|服务商直收| WxDirectPay[调用微信服务商支付<br/>子商户直接收款]
 
     WxSplitPay --> PayResult{支付结果}
     WxDirectPay --> PayResult
-    AliPay --> PayResult
+    AliPay --> AliPayResult{支付结果}
 
     PayResult -->|成功| ProfitCheck{是否分账模式?}
     PayResult -->|失败| FailEnd([支付失败])
+    AliPayResult -->|成功| SuccessEndAli([支付完成])
+    AliPayResult -->|失败| FailEnd
 
     ProfitCheck -->|是| DoSplit[发起分账请求]
     ProfitCheck -->|否| SuccessEnd([支付完成])
@@ -74,25 +85,36 @@ sequenceDiagram
     participant Redis as Redis 缓存
     participant PayGW as 支付网关
 
-    Admin->>Backend: 创建支付配置 + 绑定网点
+    Admin->>Backend: 创建微信分账配置
     Backend->>Backend: 校验配置参数有效性
-    Backend->>Backend: 写入 DB（配置 + 绑定关系）
-    Backend->>Redis: 更新缓存
+    Backend->>Backend: 写入 DB
+    Backend-->>Admin: 配置创建成功
+
+    Admin->>Backend: 为网点绑定微信配置
+    Backend->>Backend: 校验网点微信渠道无冲突
+    Backend->>Backend: 写入绑定关系(channel=wechat)
+    Backend->>Redis: 更新缓存（网点微信配置）
     Backend-->>Admin: 绑定成功
 
-    Note over PayGW: 下一次支付请求
+    Admin->>Backend: 为网点绑定支付宝配置
+    Backend->>Backend: 校验网点支付宝渠道无冲突
+    Backend->>Backend: 写入绑定关系(channel=alipay)
+    Backend->>Redis: 更新缓存（网点支付宝配置）
+    Backend-->>Admin: 绑定成功
 
-    PayGW->>Redis: 查询网点支付配置
-    Redis-->>PayGW: 返回当前绑定的配置
-    PayGW->>PayGW: 根据配置模式调用对应支付渠道
+    Note over PayGW: 用户发起支付
 
-    Admin->>Backend: 切换网点支付配置
-    Backend->>Backend: 校验新配置状态
+    PayGW->>Redis: 查询网点微信+支付宝配置
+    Redis-->>PayGW: 返回绑定的微信配置和支付宝配置
+    PayGW->>PayGW: 根据用户选择的支付方式<br/>路由到对应渠道
+
+    Admin->>Backend: 更换网点微信配置
+    Backend->>Backend: 校验新配置(channel=wechat)
     Backend->>Backend: 更新绑定关系
     Backend->>Redis: 刷新缓存
-    Backend-->>Admin: 切换成功
+    Backend-->>Admin: 切换成功（支付宝配置不受影响）
 
-    Note over PayGW: 下一次支付请求自动使用新配置
+    Note over PayGW: 下一次支付请求自动使用新微信配置<br/>支付宝配置保持不变
 ```
 
 ## 服务商分账回退流程
