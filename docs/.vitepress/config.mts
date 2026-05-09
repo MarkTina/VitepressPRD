@@ -183,6 +183,14 @@ function buildNav() {
 
 // https://vitepress.dev/reference/site-config
 export default withMermaid(defineConfig({
+  vite: {
+    resolve: {
+      alias: {
+        dayjs: path.resolve(__dirname, '../../node_modules/.pnpm/dayjs@1.11.20/node_modules/dayjs/esm/index.js')
+      }
+    }
+  },
+
   title: '产品需求文档',
   description: '高质量 PRD 文档中心',
   lang: 'zh-CN',
