@@ -199,9 +199,7 @@ function buildNav() {
 export default withMermaid(defineConfig({
   vite: {
     resolve: {
-      alias: {
-        dayjs: path.resolve(__dirname, '../../node_modules/.pnpm/dayjs@1.11.20/node_modules/dayjs/esm/index.js')
-      }
+      alias: {}
     },
   },
 
