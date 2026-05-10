@@ -30,6 +30,18 @@ npm run docs:dev
 npm run docs:build
 ```
 
+### 部署到 Cloudflare Pages
+
+```bash
+# 首次使用需先登录（仅需一次）
+npx wrangler login
+
+# 构建并部署
+npm run docs:deploy
+```
+
+部署成功后会返回在线访问地址。
+
 ## 创建新版本
 
 ```bash

@@ -109,6 +109,9 @@ npm run new-feature v1.1.0 F-001 "用户登录"
 
 # 构建
 npm run docs:build
+
+# 部署到 Cloudflare Pages（首次需先运行 npx wrangler login）
+npm run docs:deploy
 ```
 
 ### AI 协作工作流

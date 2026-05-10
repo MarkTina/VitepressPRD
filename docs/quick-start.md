@@ -18,6 +18,7 @@ npm install
 | `npm run docs:dev` | 启动开发服务器 |
 | `npm run docs:build` | 构建静态站点 |
 | `npm run docs:preview` | 预览构建结果 |
+| `npm run docs:deploy` | 构建并部署到 Cloudflare Pages |
 | `npm run new-version v1.x.x` | 创建新版本 PRD |
 | `npm run new-feature v1.x.x F-xxx "名称"` | 创建功能模块 |
 
@@ -50,3 +51,19 @@ npm run new-feature v1.1.0 F-001 "用户登录功能"
 2. **PRD 生成**：基于确认的需求，按模板生成完整 PRD
 3. **PRD 审校**：多维度检查完整性、一致性和可行性
 4. **用户文档**：基于 PRD 自动生成面向终端用户的操作说明
+
+## 部署上线
+
+首次部署前需登录 Cloudflare（仅需一次）：
+
+```bash
+npx wrangler login
+```
+
+然后一键构建并部署：
+
+```bash
+npm run docs:deploy
+```
+
+部署成功后会返回在线访问地址。
