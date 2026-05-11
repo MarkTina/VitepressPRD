@@ -8,8 +8,8 @@ version: v1.1.0
 
 | 编号 | 名称 | 关联功能 | 文件 | 说明 |
 |------|------|----------|------|------|
-| P-101 | 短信微服务后台原型 | F-101 | <a href="/prototype/f-101-sms/" target="_blank" rel="noopener">/prototype/f-101-sms/</a> | 12 个页面：服务总览 / 模板 / 审核 / 签名 / 配额 / 日志 / 渠道 / API Key，响应式 + 桌面端全局模式 |
-| P-102 | 支付架构重构后台原型 | F-102 | <a href="/prototype/f-102-payment/" target="_blank" rel="noopener">/prototype/f-102-payment/</a> | 15 个页面：支付总览 / 三种配置 / 网点绑定 / 订单 / 分账 / 退款 / 变更日志 / 告警，响应式 + 桌面端全局模式 |
+| P-101 | 短信微服务后台原型 | F-101 | <a href="/prototype/f-101-sms/index.html" target="_blank" rel="noopener">/prototype/f-101-sms/</a> | 12 个页面：服务总览 / 模板 / 审核 / 签名 / 配额 / 日志 / 渠道 / API Key，响应式 + 桌面端全局模式 |
+| P-102 | 支付架构重构后台原型 | F-102 | <a href="/prototype/f-102-payment/index.html" target="_blank" rel="noopener">/prototype/f-102-payment/</a> | 15 个页面：支付总览 / 三种配置 / 网点绑定 / 订单 / 分账 / 退款 / 变更日志 / 告警，响应式 + 桌面端全局模式 |
 
 ## 使用说明
 

@@ -10,7 +10,7 @@ owner: 后端团队
 
 ## 原型预览
 
-🎨 <a href="/prototype/f-101-sms/" target="_blank" rel="noopener">在新窗口打开「F-101 短信微服务」H5 原型</a>
+🎨 <a href="/prototype/f-101-sms/index.html" target="_blank" rel="noopener">在新窗口打开「F-101 短信微服务」H5 原型</a>
 
 > 包含 12 个页面:服务总览 / 模板列表 / 模板详情 / 模板编辑 / 模板审核 / 签名管理 / 租户配额 / 调整配额 / 发送日志 / 日志详情 / 短信渠道 / API Key 管理。桌面端右下角悬浮按钮可切换「全局模式」,一屏查看所有页面缩略图。
 

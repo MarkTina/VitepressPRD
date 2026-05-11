@@ -10,7 +10,7 @@ owner: 后端团队
 
 ## 原型预览
 
-🎨 <a href="/prototype/f-102-payment/" target="_blank" rel="noopener">在新窗口打开「F-102 支付架构重构」H5 原型</a>
+🎨 <a href="/prototype/f-102-payment/index.html" target="_blank" rel="noopener">在新窗口打开「F-102 支付架构重构」H5 原型</a>
 
 > 包含 15 个页面:支付总览 / 配置列表 / 配置详情 / 微信分账配置 / 微信直收配置 / 支付宝配置 / 分账规则详情 / 网点列表 / 网点支付设置 / 订单查询 / 订单详情 / 分账记录 / 退款记录 / 变更日志 / 告警中心。桌面端右下角悬浮按钮可切换「全局模式」,一屏查看所有页面缩略图。
 
