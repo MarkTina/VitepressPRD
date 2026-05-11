@@ -11,6 +11,9 @@ importers:
       '@braintree/sanitize-url':
         specifier: ^7.1.2
         version: 7.1.2
+      dayjs:
+        specifier: ^1.11.20
+        version: 1.11.20
       mermaid:
         specifier: ^11.6.0
         version: 11.14.0

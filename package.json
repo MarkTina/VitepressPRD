@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@braintree/sanitize-url": "^7.1.2",
+    "dayjs": "^1.11.20",
     "mermaid": "^11.6.0",
     "vitepress": "^1.6.3",
     "vitepress-plugin-mermaid": "^2.0.17",
