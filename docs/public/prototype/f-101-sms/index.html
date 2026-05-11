@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>F-101 短信微服务 · 原型</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .thumb-frame { transform-origin: top left; pointer-events: none; }
+    .thumb-wrap { width: 1440px; height: 900px; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-700">
+  <div id="app" v-cloak></div>
+
+  <script>
+  const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch, provide, inject, h, defineComponent, nextTick } = Vue;
+
+  // ============================================================
+  // 1. Mock 数据
+  // ============================================================
+  const store = reactive({
+    tenants: [
+      { id: 'T001', name: '快递配送平台', apiKey: 'sk_live_8f3a***c91d' },
+      { id: 'T002', name: '自助洗衣业务线', apiKey: 'sk_live_2bd0***74a2' },
+      { id: 'T003', name: '用户中心', apiKey: 'sk_live_61e9***0a3f' },
+      { id: 'T004', name: '财务系统', apiKey: 'sk_live_a47b***9f02' },
+    ],
+    channels: [
+      { code: 'aliyun', name: '阿里云短信', priority: 1, apiKey: 'LTAI***7H9X', status: 'active', successRate: 99.2 },
+      { code: 'tencent', name: '腾讯云短信', priority: 2, apiKey: 'AKID***Pq3K', status: 'active', successRate: 98.7 },
+      { code: 'huawei', name: '华为云短信', priority: 3, apiKey: 'HW**4dE2', status: 'inactive', successRate: 0 },
+    ],
+    signatures: [
+      { id: 'SG001', name: '快递配送', provider: 'aliyun', status: 'approved', tplCount: 8 },
+      { id: 'SG002', name: '自助洗衣', provider: 'aliyun', status: 'approved', tplCount: 5 },
+      { id: 'SG003', name: '商城会员', provider: 'tencent', status: 'approved', tplCount: 3 },
+      { id: 'SG004', name: '财务通知', provider: 'aliyun', status: 'reviewing', tplCount: 1 },
+    ],
+    templates: [
+      { id: 'TPL001', name: '快递取件通知', provider: 'aliyun', providerTplId: 'SMS_2031', content: '【快递配送】您的快递已送达${address}，取件码${code}，请及时取件。', variables: ['address', 'code'], signatureId: 'SG001', status: 'active', reviewedBy: '张运营', createdAt: '2026-04-12' },
+      { id: 'TPL002', name: '快递派送中', provider: 'aliyun', providerTplId: 'SMS_2032', content: '【快递配送】您的快递${trackingNo}正在派送中，预计${eta}送达。', variables: ['trackingNo', 'eta'], signatureId: 'SG001', status: 'active', reviewedBy: '张运营', createdAt: '2026-04-12' },
+      { id: 'TPL003', name: '洗衣完成提醒', provider: 'aliyun', providerTplId: 'SMS_2044', content: '【自助洗衣】您${siteName}的衣物已洗涤完成，请在2小时内取走。', variables: ['siteName'], signatureId: 'SG002', status: 'active', reviewedBy: '李运营', createdAt: '2026-04-21' },
+      { id: 'TPL004', name: '注册验证码', provider: 'tencent', providerTplId: 'SMS_3010', content: '【商城会员】您的验证码为${code}，5分钟内有效，请勿泄露。', variables: ['code'], signatureId: 'SG003', status: 'active', reviewedBy: '王运营', createdAt: '2026-04-05' },
+      { id: 'TPL005', name: '财务到账通知', provider: 'aliyun', providerTplId: 'SMS_2099', content: '【财务通知】您的账户已到账${amount}元，请查收。', variables: ['amount'], signatureId: 'SG004', status: 'reviewing', reviewedBy: null, createdAt: '2026-05-08' },
+      { id: 'TPL006', name: '洗衣机故障预警', provider: 'aliyun', providerTplId: '', content: '【自助洗衣】${siteName}的${deviceNo}号洗衣机出现故障，请尽快处理。', variables: ['siteName', 'deviceNo'], signatureId: 'SG002', status: 'draft', reviewedBy: null, createdAt: '2026-05-10' },
+      { id: 'TPL007', name: '会员积分到期', provider: 'tencent', providerTplId: 'SMS_3022', content: '【商城会员】您的${points}积分将于${date}到期，请尽快使用。', variables: ['points', 'date'], signatureId: 'SG003', status: 'inactive', reviewedBy: '王运营', createdAt: '2026-03-18' },
+    ],
+    quotas: [
+      { tenantId: 'T001', tenantName: '快递配送平台', dailyLimit: 50000, usedToday: 38420, status: 'normal' },
+      { tenantId: 'T002', tenantName: '自助洗衣业务线', dailyLimit: 20000, usedToday: 19850, status: 'warning' },
+      { tenantId: 'T003', tenantName: '用户中心', dailyLimit: 10000, usedToday: 10000, status: 'exceeded' },
+      { tenantId: 'T004', tenantName: '财务系统', dailyLimit: 5000, usedToday: 1230, status: 'normal' },
+    ],
+    logs: [
+      { messageId: 'M20260511001', tenantId: 'T001', templateId: 'TPL001', mobile: '138****3211', status: 'success', failReason: null, retryCount: 0, createdAt: '2026-05-11 14:32:18', channel: 'aliyun' },
+      { messageId: 'M20260511002', tenantId: 'T002', templateId: 'TPL003', mobile: '139****7822', status: 'success', failReason: null, retryCount: 0, createdAt: '2026-05-11 14:31:55', channel: 'aliyun' },
+      { messageId: 'M20260511003', tenantId: 'T001', templateId: 'TPL002', mobile: '186****1029', status: 'failed', failReason: '号码黑名单', retryCount: 0, createdAt: '2026-05-11 14:31:30', channel: 'aliyun' },
+      { messageId: 'M20260511004', tenantId: 'T003', templateId: 'TPL004', mobile: '177****0093', status: 'rate_limited', failReason: '渠道限流，待重试', retryCount: 1, createdAt: '2026-05-11 14:30:18', channel: 'tencent' },
+      { messageId: 'M20260511005', tenantId: 'T001', templateId: 'TPL001', mobile: '188****5512', status: 'sending', failReason: null, retryCount: 0, createdAt: '2026-05-11 14:29:44', channel: 'aliyun' },
+      { messageId: 'M20260511006', tenantId: 'T002', templateId: 'TPL003', mobile: '135****8809', status: 'failed', failReason: '网络超时(3次重试失败)', retryCount: 3, createdAt: '2026-05-11 14:28:11', channel: 'aliyun' },
+      { messageId: 'M20260511007', tenantId: 'T001', templateId: 'TPL001', mobile: '152****6710', status: 'queued', failReason: null, retryCount: 0, createdAt: '2026-05-11 14:27:50', channel: 'aliyun' },
+      { messageId: 'M20260511008', tenantId: 'T004', templateId: 'TPL005', mobile: '180****3344', status: 'success', failReason: null, retryCount: 0, createdAt: '2026-05-11 14:25:12', channel: 'aliyun' },
+    ],
+    metrics: {
+      todaySent: 69500,
+      todaySuccess: 68210,
+      todayFailed: 920,
+      todayQueued: 370,
+      successRate: 98.15,
+      activeTenants: 4,
+      activeTemplates: 5,
+      pendingReview: 1,
+    },
+    apiKeys: [
+      { id: 'K001', tenantId: 'T001', tenantName: '快递配送平台', apiKey: 'sk_live_8f3a***c91d', createdAt: '2025-12-10', lastUsed: '2026-05-11 14:32', status: 'active' },
+      { id: 'K002', tenantId: 'T002', tenantName: '自助洗衣业务线', apiKey: 'sk_live_2bd0***74a2', createdAt: '2026-01-15', lastUsed: '2026-05-11 14:31', status: 'active' },
+      { id: 'K003', tenantId: 'T003', tenantName: '用户中心', apiKey: 'sk_live_61e9***0a3f', createdAt: '2025-11-08', lastUsed: '2026-05-11 14:30', status: 'active' },
+      { id: 'K004', tenantId: 'T004', tenantName: '财务系统', apiKey: 'sk_live_a47b***9f02', createdAt: '2026-03-02', lastUsed: '2026-05-11 14:25', status: 'active' },
+      { id: 'K005', tenantId: 'T001', tenantName: '快递配送平台(测试)', apiKey: 'sk_test_71c8***9ebd', createdAt: '2025-09-21', lastUsed: '2026-05-09 11:18', status: 'inactive' },
+    ],
+  });
+
+  // ============================================================
+  // 2. 路由
+  // ============================================================
+  const route = reactive({ name: 'dashboard', params: {} });
+
+  function parseHash() {
+    const hash = location.hash.replace(/^#/, '') || '/dashboard';
+    const seg = hash.split('/').filter(Boolean);
+    if (seg.length === 0) return { name: 'dashboard', params: {} };
+    if (seg[0] === 'dashboard') return { name: 'dashboard', params: {} };
+    if (seg[0] === 'templates') {
+      if (!seg[1]) return { name: 'template-list', params: {} };
+      if (seg[1] === 'review') return { name: 'template-review', params: {} };
+      if (seg[1] === 'edit') return { name: 'template-edit', params: { id: seg[2] } };
+      return { name: 'template-detail', params: { id: seg[1] } };
+    }
+    if (seg[0] === 'signatures') return { name: 'signature-list', params: {} };
+    if (seg[0] === 'quotas') {
+      if (!seg[1]) return { name: 'quota-list', params: {} };
+      if (seg[1] === 'edit') return { name: 'quota-edit', params: { tenant: seg[2] } };
+    }
+    if (seg[0] === 'logs') {
+      if (!seg[1]) return { name: 'send-log', params: {} };
+      return { name: 'log-detail', params: { id: seg[1] } };
+    }
+    if (seg[0] === 'channels') return { name: 'channel-config', params: {} };
+    if (seg[0] === 'api-keys') return { name: 'api-key', params: {} };
+    return { name: 'dashboard', params: {} };
+  }
+
+  function syncRoute() {
+    const r = parseHash();
+    route.name = r.name;
+    route.params = r.params;
+  }
+
+  window.addEventListener('hashchange', syncRoute);
+
+  const navigate = (path) => { location.hash = path; };
+
+  // ============================================================
+  // 3. 公共组件
+  // ============================================================
+  const StatusBadge = {
+    props: ['status'],
+    setup(props) {
+      const map = {
+        active: { tone: 'emerald', label: '已启用' },
+        approved: { tone: 'emerald', label: '已通过' },
+        inactive: { tone: 'slate', label: '已停用' },
+        draft: { tone: 'slate', label: '草稿' },
+        reviewing: { tone: 'amber', label: '待审核' },
+        success: { tone: 'emerald', label: '发送成功' },
+        failed: { tone: 'rose', label: '发送失败' },
+        sending: { tone: 'sky', label: '发送中' },
+        queued: { tone: 'slate', label: '已入队' },
+        rate_limited: { tone: 'amber', label: '限流重试' },
+        normal: { tone: 'emerald', label: '正常' },
+        warning: { tone: 'amber', label: '接近上限' },
+        exceeded: { tone: 'rose', label: '已超限' },
+      };
+      return () => {
+        const c = map[props.status] || { tone: 'slate', label: props.status };
+        const classMap = {
+          emerald: 'bg-emerald-100 text-emerald-700',
+          rose: 'bg-rose-100 text-rose-700',
+          amber: 'bg-amber-100 text-amber-700',
+          sky: 'bg-sky-100 text-sky-700',
+          slate: 'bg-slate-100 text-slate-600',
+        };
+        return h('span', { class: `inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${classMap[c.tone]}` }, c.label);
+      };
+    }
+  };
+
+  const Card = {
+    props: ['title', 'subtitle'],
+    setup(props, { slots }) {
+      return () => h('div', { class: 'bg-white rounded-xl shadow-sm border border-slate-200 p-5 lg:p-6' }, [
+        (props.title || props.subtitle) && h('div', { class: 'mb-4 flex items-center justify-between' }, [
+          h('div', null, [
+            props.title && h('h3', { class: 'text-base font-semibold text-slate-800' }, props.title),
+            props.subtitle && h('p', { class: 'text-xs text-slate-500 mt-1' }, props.subtitle),
+          ]),
+          slots.actions && slots.actions(),
+        ]),
+        slots.default && slots.default(),
+      ]);
+    }
+  };
+
+  const StatCard = {
+    props: ['label', 'value', 'tone', 'hint'],
+    setup(props) {
+      const toneMap = {
+        indigo: 'from-indigo-500 to-indigo-600',
+        emerald: 'from-emerald-500 to-emerald-600',
+        amber: 'from-amber-500 to-amber-600',
+        rose: 'from-rose-500 to-rose-600',
+        slate: 'from-slate-500 to-slate-600',
+        sky: 'from-sky-500 to-sky-600',
+      };
+      return () => h('div', { class: 'bg-white rounded-xl shadow-sm border border-slate-200 p-5 overflow-hidden relative' }, [
+        h('p', { class: 'text-xs font-medium text-slate-500' }, props.label),
+        h('p', { class: 'mt-2 text-3xl font-bold text-slate-800' }, props.value),
+        props.hint && h('p', { class: 'mt-1 text-xs text-slate-400' }, props.hint),
+        h('div', { class: `absolute top-0 left-0 h-1 w-full bg-gradient-to-r ${toneMap[props.tone || 'indigo']}` }),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 4. 页面组件
+  // ============================================================
+
+  // ---------- Dashboard ----------
+  const PageDashboard = {
+    setup() {
+      const m = store.metrics;
+      return () => h('div', { class: 'space-y-6' }, [
+        h('div', { class: 'grid grid-cols-2 lg:grid-cols-4 gap-4' }, [
+          h(StatCard, { label: '今日发送量', value: m.todaySent.toLocaleString(), tone: 'indigo', hint: '较昨日 +8.2%' }),
+          h(StatCard, { label: '发送成功率', value: m.successRate + '%', tone: 'emerald', hint: '目标 ≥ 98%' }),
+          h(StatCard, { label: '失败/重试中', value: m.todayFailed + m.todayQueued, tone: 'amber', hint: `失败 ${m.todayFailed} · 队列 ${m.todayQueued}` }),
+          h(StatCard, { label: '待审核模板', value: m.pendingReview, tone: 'rose', hint: '点击下方卡片处理' }),
+        ]),
+        h('div', { class: 'grid grid-cols-1 lg:grid-cols-3 gap-6' }, [
+          h(Card, { title: '渠道发送占比' }, {
+            default: () => h('div', { class: 'space-y-3 mt-2' }, store.channels.filter(c => c.status === 'active').map(c =>
+              h('div', null, [
+                h('div', { class: 'flex justify-between text-sm mb-1' }, [
+                  h('span', { class: 'font-medium' }, c.name),
+                  h('span', { class: 'text-slate-500' }, c.successRate + '%'),
+                ]),
+                h('div', { class: 'h-2 bg-slate-100 rounded-full overflow-hidden' },
+                  h('div', { class: 'h-full bg-indigo-500 rounded-full', style: { width: c.successRate + '%' } })
+                ),
+              ])
+            ))
+          }),
+          h(Card, { title: '租户配额预警' }, {
+            default: () => h('div', { class: 'space-y-3' }, store.quotas.map(q =>
+              h('div', { class: 'flex items-center justify-between cursor-pointer hover:bg-slate-50 -mx-2 px-2 py-1.5 rounded-lg', onClick: () => navigate(`/quotas`) }, [
+                h('div', null, [
+                  h('p', { class: 'text-sm font-medium text-slate-700' }, q.tenantName),
+                  h('p', { class: 'text-xs text-slate-400 mt-0.5' }, `${q.usedToday.toLocaleString()} / ${q.dailyLimit.toLocaleString()}`),
+                ]),
+                h(StatusBadge, { status: q.status }),
+              ])
+            ))
+          }),
+          h(Card, { title: '最近发送' }, {
+            default: () => h('div', { class: 'space-y-2.5' }, store.logs.slice(0, 5).map(l =>
+              h('div', { class: 'flex items-center justify-between text-sm cursor-pointer hover:bg-slate-50 -mx-2 px-2 py-1 rounded-lg', onClick: () => navigate(`/logs/${l.messageId}`) }, [
+                h('div', { class: 'min-w-0 flex-1' }, [
+                  h('p', { class: 'font-mono text-xs text-slate-700 truncate' }, l.mobile),
+                  h('p', { class: 'text-xs text-slate-400 mt-0.5 truncate' }, l.createdAt.slice(11)),
+                ]),
+                h(StatusBadge, { status: l.status }),
+              ])
+            ))
+          }),
+        ]),
+      ]);
+    }
+  };
+
+  // ---------- 模板列表 ----------
+  const PageTemplateList = {
+    setup() {
+      const filter = ref('all');
+      const list = computed(() => filter.value === 'all' ? store.templates : store.templates.filter(t => t.status === filter.value));
+      return () => h('div', { class: 'space-y-4' }, [
+        h(Card, { title: '短信模板', subtitle: `共 ${store.templates.length} 个模板,${store.templates.filter(t => t.status === 'active').length} 个已启用` }, {
+          actions: () => h('div', { class: 'flex gap-2' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/templates/review') }, '待审核'),
+            h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700', onClick: () => navigate('/templates/edit/new') }, '新建模板'),
+          ]),
+          default: () => h('div', null, [
+            h('div', { class: 'flex flex-wrap gap-2 mb-4' }, ['all', 'active', 'reviewing', 'inactive', 'draft'].map(s =>
+              h('button', { class: `px-3 py-1.5 rounded-lg text-xs ${filter.value === s ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'bg-slate-50 text-slate-500'}`, onClick: () => filter.value = s },
+                { all: '全部', active: '已启用', reviewing: '待审核', inactive: '已停用', draft: '草稿' }[s]
+              )
+            )),
+            h('div', { class: 'hidden md:block overflow-x-auto' },
+              h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+                h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                  h('tr', null, ['模板 ID', '名称', '渠道', '签名', '状态', '创建时间', ''].map(t =>
+                    h('th', { class: 'px-4 py-2.5 text-left font-medium' }, t)
+                  ))
+                ),
+                h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, list.value.map(t =>
+                  h('tr', { class: 'hover:bg-slate-50 cursor-pointer', onClick: () => navigate(`/templates/${t.id}`) }, [
+                    h('td', { class: 'px-4 py-3 font-mono text-xs text-slate-500' }, t.id),
+                    h('td', { class: 'px-4 py-3 font-medium text-slate-700' }, t.name),
+                    h('td', { class: 'px-4 py-3 text-slate-500' }, t.provider === 'aliyun' ? '阿里云' : '腾讯云'),
+                    h('td', { class: 'px-4 py-3 text-slate-500' }, (store.signatures.find(s => s.id === t.signatureId) || {}).name || '—'),
+                    h('td', { class: 'px-4 py-3' }, h(StatusBadge, { status: t.status })),
+                    h('td', { class: 'px-4 py-3 text-slate-500 text-xs' }, t.createdAt),
+                    h('td', { class: 'px-4 py-3' }, h('button', { class: 'text-indigo-600 hover:text-indigo-700 text-xs font-medium', onClick: (e) => { e.stopPropagation(); navigate(`/templates/edit/${t.id}`); } }, '编辑')),
+                  ])
+                ))
+              ])
+            ),
+            // 移动端卡片
+            h('div', { class: 'md:hidden space-y-3' }, list.value.map(t =>
+              h('div', { class: 'border border-slate-200 rounded-lg p-3', onClick: () => navigate(`/templates/${t.id}`) }, [
+                h('div', { class: 'flex justify-between items-start mb-2' }, [
+                  h('div', null, [
+                    h('p', { class: 'font-medium text-sm' }, t.name),
+                    h('p', { class: 'font-mono text-xs text-slate-400 mt-0.5' }, t.id),
+                  ]),
+                  h(StatusBadge, { status: t.status }),
+                ]),
+                h('p', { class: 'text-xs text-slate-500 line-clamp-2' }, t.content),
+                h('div', { class: 'flex gap-3 mt-2 text-xs text-slate-400' }, [
+                  h('span', null, t.provider === 'aliyun' ? '阿里云' : '腾讯云'),
+                  h('span', null, t.createdAt),
+                ]),
+              ])
+            )),
+          ])
+        })
+      ]);
+    }
+  };
+
+  // ---------- 模板详情 ----------
+  const PageTemplateDetail = {
+    setup() {
+      const tpl = computed(() => store.templates.find(t => t.id === route.params.id) || store.templates[0]);
+      return () => {
+        const t = tpl.value;
+        const sig = store.signatures.find(s => s.id === t.signatureId);
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('h2', { class: 'text-xl font-bold text-slate-800' }, t.name),
+              h('p', { class: 'text-xs text-slate-500 mt-1 font-mono' }, t.id),
+            ]),
+            h('div', { class: 'flex gap-2' }, [
+              h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/templates') }, '返回列表'),
+              h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700', onClick: () => navigate(`/templates/edit/${t.id}`) }, '编辑模板'),
+            ]),
+          ]),
+          h(Card, { title: '基本信息' }, {
+            default: () => h('dl', { class: 'grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm' }, [
+              ['状态', h(StatusBadge, { status: t.status })],
+              ['渠道', t.provider === 'aliyun' ? '阿里云短信' : '腾讯云短信'],
+              ['渠道模板 ID', h('span', { class: 'font-mono text-xs' }, t.providerTplId || '— 未提交')],
+              ['关联签名', sig ? sig.name : '—'],
+              ['审核人', t.reviewedBy || '—'],
+              ['创建时间', t.createdAt],
+            ].map(([k, v]) => h('div', { class: 'flex' }, [
+              h('dt', { class: 'w-24 text-slate-500' }, k),
+              h('dd', { class: 'flex-1 text-slate-700' }, v),
+            ])))
+          }),
+          h(Card, { title: '模板内容' }, {
+            default: () => h('div', null, [
+              h('div', { class: 'bg-slate-50 rounded-lg p-4 text-sm font-mono text-slate-700 whitespace-pre-wrap' }, t.content),
+              h('div', { class: 'mt-3 flex flex-wrap gap-2' }, t.variables.map(v =>
+                h('span', { class: 'inline-flex px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-xs font-mono' }, '${' + v + '}')
+              )),
+            ])
+          }),
+          h(Card, { title: '发送测试' }, {
+            default: () => h('div', { class: 'space-y-3' }, [
+              h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-3' }, [
+                h('div', null, [
+                  h('label', { class: 'block text-xs text-slate-500 mb-1' }, '测试手机号'),
+                  h('input', { type: 'text', value: '13800138000', class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' }),
+                ]),
+                h('div', null, [
+                  h('label', { class: 'block text-xs text-slate-500 mb-1' }, '变量值(JSON)'),
+                  h('input', { type: 'text', value: JSON.stringify(t.variables.reduce((a, v) => (a[v] = '示例', a), {})), class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-indigo-500 focus:ring-indigo-500' }),
+                ]),
+              ]),
+              h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700' }, '发送测试短信'),
+            ])
+          }),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 模板编辑 ----------
+  const PageTemplateEdit = {
+    setup() {
+      const isNew = computed(() => !route.params.id || route.params.id === 'new');
+      const found = computed(() => store.templates.find(t => t.id === route.params.id));
+      const form = reactive({
+        name: '', provider: 'aliyun', providerTplId: '', content: '', signatureId: 'SG001',
+      });
+      watch(found, (t) => {
+        if (t) {
+          form.name = t.name; form.provider = t.provider; form.providerTplId = t.providerTplId; form.content = t.content; form.signatureId = t.signatureId;
+        } else {
+          form.name = ''; form.provider = 'aliyun'; form.providerTplId = ''; form.content = ''; form.signatureId = 'SG001';
+        }
+      }, { immediate: true });
+
+      const save = () => {
+        if (isNew.value) {
+          const id = 'TPL' + String(Math.floor(Math.random() * 900) + 100);
+          store.templates.unshift({ id, ...form, variables: [], status: 'draft', reviewedBy: null, createdAt: '2026-05-11' });
+          navigate(`/templates/${id}`);
+        } else {
+          Object.assign(found.value, form);
+          navigate(`/templates/${found.value.id}`);
+        }
+      };
+
+      return () => h(Card, { title: isNew.value ? '新建模板' : '编辑模板' }, {
+        default: () => h('div', { class: 'space-y-4 max-w-2xl' }, [
+          h('div', null, [
+            h('label', { class: 'block text-xs text-slate-500 mb-1' }, '模板名称 *'),
+            h('input', { type: 'text', value: form.name, onInput: e => form.name = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' }),
+          ]),
+          h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
+            h('div', null, [
+              h('label', { class: 'block text-xs text-slate-500 mb-1' }, '适用渠道 *'),
+              h('select', { value: form.provider, onChange: e => form.provider = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' }, [
+                h('option', { value: 'aliyun' }, '阿里云短信'),
+                h('option', { value: 'tencent' }, '腾讯云短信'),
+              ]),
+            ]),
+            h('div', null, [
+              h('label', { class: 'block text-xs text-slate-500 mb-1' }, '渠道模板 ID'),
+              h('input', { type: 'text', value: form.providerTplId, onInput: e => form.providerTplId = e.target.value, placeholder: '如 SMS_20310', class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-indigo-500 focus:ring-indigo-500' }),
+            ]),
+          ]),
+          h('div', null, [
+            h('label', { class: 'block text-xs text-slate-500 mb-1' }, '关联签名 *'),
+            h('select', { value: form.signatureId, onChange: e => form.signatureId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' },
+              store.signatures.map(s => h('option', { value: s.id }, s.name))
+            ),
+          ]),
+          h('div', null, [
+            h('label', { class: 'block text-xs text-slate-500 mb-1' }, '模板内容 *(使用 ${变量名} 表示占位符)'),
+            h('textarea', { rows: 4, value: form.content, onInput: e => form.content = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' }),
+            h('p', { class: 'mt-1 text-xs text-slate-400' }, `当前 ${form.content.length} 字符,建议不超过 70 字`),
+          ]),
+          h('div', { class: 'flex gap-2 pt-3 border-t border-slate-100' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/templates') }, '取消'),
+            h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700', onClick: save }, isNew.value ? '保存为草稿' : '保存修改'),
+          ]),
+        ])
+      });
+    }
+  };
+
+  // ---------- 模板审核 ----------
+  const PageTemplateReview = {
+    setup() {
+      const list = computed(() => store.templates.filter(t => t.status === 'reviewing'));
+      const approve = (tpl) => { tpl.status = 'active'; tpl.reviewedBy = '当前用户'; };
+      const reject = (tpl) => { tpl.status = 'draft'; };
+      return () => h('div', { class: 'space-y-4' }, [
+        h(Card, { title: '待审核模板', subtitle: `${list.value.length} 个模板等待审核` }, {
+          default: () => list.value.length === 0
+            ? h('div', { class: 'text-center py-12 text-slate-400 text-sm' }, '暂无待审核模板')
+            : h('div', { class: 'space-y-4' }, list.value.map(t => h('div', { class: 'border border-slate-200 rounded-lg p-4' }, [
+              h('div', { class: 'flex justify-between items-start' }, [
+                h('div', null, [
+                  h('p', { class: 'font-medium text-slate-800' }, t.name),
+                  h('p', { class: 'text-xs text-slate-400 font-mono mt-1' }, `${t.id} · 提交于 ${t.createdAt}`),
+                ]),
+                h(StatusBadge, { status: t.status }),
+              ]),
+              h('div', { class: 'mt-3 bg-slate-50 rounded p-3 text-sm font-mono text-slate-700' }, t.content),
+              h('div', { class: 'mt-3 flex gap-2' }, [
+                h('button', { class: 'px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700', onClick: () => approve(t) }, '通过'),
+                h('button', { class: 'px-3 py-1.5 rounded-lg border border-rose-300 text-rose-600 text-xs font-medium hover:bg-rose-50', onClick: () => reject(t) }, '驳回'),
+                h('button', { class: 'px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-100', onClick: () => navigate(`/templates/${t.id}`) }, '查看详情'),
+              ]),
+            ])))
+        })
+      ]);
+    }
+  };
+
+  // ---------- 签名管理 ----------
+  const PageSignatureList = {
+    setup() {
+      return () => h(Card, { title: '短信签名', subtitle: '签名由短信渠道审核,审核通过后才能用于模板' }, {
+        actions: () => h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700' }, '申请签名'),
+        default: () => h('div', { class: 'overflow-x-auto' },
+          h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+            h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+              h('tr', null, ['签名 ID', '名称', '渠道', '状态', '关联模板数'].map(t =>
+                h('th', { class: 'px-4 py-2.5 text-left font-medium' }, t)
+              ))
+            ),
+            h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, store.signatures.map(s =>
+              h('tr', null, [
+                h('td', { class: 'px-4 py-3 font-mono text-xs text-slate-500' }, s.id),
+                h('td', { class: 'px-4 py-3 font-medium' }, s.name),
+                h('td', { class: 'px-4 py-3 text-slate-500' }, s.provider === 'aliyun' ? '阿里云' : '腾讯云'),
+                h('td', { class: 'px-4 py-3' }, h(StatusBadge, { status: s.status })),
+                h('td', { class: 'px-4 py-3 text-slate-500' }, s.tplCount + ' 个'),
+              ])
+            ))
+          ])
+        )
+      });
+    }
+  };
+
+  // ---------- 配额列表 ----------
+  const PageQuotaList = {
+    setup() {
+      const pct = (q) => Math.round(q.usedToday / q.dailyLimit * 100);
+      return () => h(Card, { title: '租户配额', subtitle: '每个租户的日发送上限独立配置,超限时自动拦截' }, {
+        default: () => h('div', { class: 'space-y-3' }, store.quotas.map(q => {
+          const p = pct(q);
+          const barColor = q.status === 'exceeded' ? 'bg-rose-500' : q.status === 'warning' ? 'bg-amber-500' : 'bg-indigo-500';
+          return h('div', { class: 'border border-slate-200 rounded-lg p-4' }, [
+            h('div', { class: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [
+              h('div', null, [
+                h('p', { class: 'font-medium text-slate-800' }, q.tenantName),
+                h('p', { class: 'text-xs text-slate-400 font-mono mt-0.5' }, q.tenantId),
+              ]),
+              h('div', { class: 'flex items-center gap-3' }, [
+                h(StatusBadge, { status: q.status }),
+                h('button', { class: 'px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs hover:bg-slate-100', onClick: () => navigate(`/quotas/edit/${q.tenantId}`) }, '调整配额'),
+              ]),
+            ]),
+            h('div', { class: 'flex items-center gap-3 mb-1' }, [
+              h('div', { class: 'flex-1 h-2 bg-slate-100 rounded-full overflow-hidden' },
+                h('div', { class: `h-full ${barColor} rounded-full`, style: { width: Math.min(p, 100) + '%' } })
+              ),
+              h('span', { class: 'text-xs font-medium text-slate-600 w-12 text-right' }, p + '%'),
+            ]),
+            h('p', { class: 'text-xs text-slate-500' }, `今日已发 ${q.usedToday.toLocaleString()} / 上限 ${q.dailyLimit.toLocaleString()}`),
+          ]);
+        }))
+      });
+    }
+  };
+
+  // ---------- 配额编辑 ----------
+  const PageQuotaEdit = {
+    setup() {
+      const q = computed(() => store.quotas.find(x => x.tenantId === route.params.tenant) || store.quotas[0]);
+      const newLimit = ref(q.value.dailyLimit);
+      watch(q, (v) => { newLimit.value = v.dailyLimit; });
+      const save = () => { q.value.dailyLimit = Number(newLimit.value); q.value.status = q.value.usedToday >= q.value.dailyLimit ? 'exceeded' : (q.value.usedToday / q.value.dailyLimit > 0.9 ? 'warning' : 'normal'); navigate('/quotas'); };
+      return () => h(Card, { title: '调整配额 - ' + q.value.tenantName }, {
+        default: () => h('div', { class: 'space-y-4 max-w-md' }, [
+          h('div', null, [
+            h('label', { class: 'block text-xs text-slate-500 mb-1' }, '当前日发送上限'),
+            h('p', { class: 'text-2xl font-bold text-slate-800' }, q.value.dailyLimit.toLocaleString()),
+          ]),
+          h('div', null, [
+            h('label', { class: 'block text-xs text-slate-500 mb-1' }, '新的日发送上限 *'),
+            h('input', { type: 'number', value: newLimit.value, onInput: e => newLimit.value = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500' }),
+            h('p', { class: 'mt-1 text-xs text-slate-400' }, '调整后立即生效,当日已发送量保留'),
+          ]),
+          h('div', { class: 'flex gap-2 pt-3 border-t border-slate-100' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/quotas') }, '取消'),
+            h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700', onClick: save }, '保存'),
+          ]),
+        ])
+      });
+    }
+  };
+
+  // ---------- 发送日志 ----------
+  const PageSendLog = {
+    setup() {
+      const filterStatus = ref('all');
+      const list = computed(() => filterStatus.value === 'all' ? store.logs : store.logs.filter(l => l.status === filterStatus.value));
+      const tenantName = (id) => (store.tenants.find(t => t.id === id) || {}).name || id;
+      const tplName = (id) => (store.templates.find(t => t.id === id) || {}).name || id;
+      return () => h(Card, { title: '发送日志', subtitle: `共 ${store.logs.length} 条记录,保留 90 天` }, {
+        actions: () => h('select', { value: filterStatus.value, onChange: e => filterStatus.value = e.target.value, class: 'rounded-lg border-slate-300 text-xs' }, [
+          h('option', { value: 'all' }, '全部状态'),
+          h('option', { value: 'success' }, '成功'),
+          h('option', { value: 'failed' }, '失败'),
+          h('option', { value: 'sending' }, '发送中'),
+          h('option', { value: 'rate_limited' }, '限流'),
+          h('option', { value: 'queued' }, '已入队'),
+        ]),
+        default: () => h('div', null, [
+          h('div', { class: 'hidden lg:block overflow-x-auto' },
+            h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+              h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                h('tr', null, ['消息 ID', '租户', '模板', '手机号', '渠道', '状态', '重试', '时间'].map(t =>
+                  h('th', { class: 'px-3 py-2.5 text-left font-medium' }, t)
+                ))
+              ),
+              h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, list.value.map(l =>
+                h('tr', { class: 'hover:bg-slate-50 cursor-pointer', onClick: () => navigate(`/logs/${l.messageId}`) }, [
+                  h('td', { class: 'px-3 py-2.5 font-mono text-xs text-slate-500' }, l.messageId),
+                  h('td', { class: 'px-3 py-2.5' }, tenantName(l.tenantId)),
+                  h('td', { class: 'px-3 py-2.5 text-slate-600' }, tplName(l.templateId)),
+                  h('td', { class: 'px-3 py-2.5 font-mono text-xs' }, l.mobile),
+                  h('td', { class: 'px-3 py-2.5 text-slate-500' }, l.channel === 'aliyun' ? '阿里云' : '腾讯云'),
+                  h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: l.status })),
+                  h('td', { class: 'px-3 py-2.5 text-slate-500' }, l.retryCount),
+                  h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, l.createdAt.slice(11)),
+                ])
+              ))
+            ])
+          ),
+          h('div', { class: 'lg:hidden space-y-3' }, list.value.map(l =>
+            h('div', { class: 'border border-slate-200 rounded-lg p-3 cursor-pointer', onClick: () => navigate(`/logs/${l.messageId}`) }, [
+              h('div', { class: 'flex justify-between items-start mb-1.5' }, [
+                h('p', { class: 'font-mono text-xs text-slate-700' }, l.mobile),
+                h(StatusBadge, { status: l.status }),
+              ]),
+              h('p', { class: 'text-sm font-medium' }, tplName(l.templateId)),
+              h('div', { class: 'flex gap-3 mt-1 text-xs text-slate-400' }, [
+                h('span', null, tenantName(l.tenantId)),
+                h('span', null, l.createdAt.slice(11)),
+              ]),
+            ])
+          )),
+        ])
+      });
+    }
+  };
+
+  // ---------- 日志详情 ----------
+  const PageLogDetail = {
+    setup() {
+      const log = computed(() => store.logs.find(l => l.messageId === route.params.id) || store.logs[0]);
+      return () => {
+        const l = log.value;
+        const tpl = store.templates.find(t => t.id === l.templateId);
+        const tenant = store.tenants.find(t => t.id === l.tenantId);
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('p', { class: 'text-xs text-slate-500 font-mono' }, l.messageId),
+              h('h2', { class: 'text-lg font-bold text-slate-800 mt-0.5' }, '发送详情'),
+            ]),
+            h('div', { class: 'flex gap-2' }, [
+              h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/logs') }, '返回列表'),
+              l.status === 'failed' && h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700' }, '手动重发'),
+            ]),
+          ]),
+          h(Card, { title: '基本信息' }, {
+            default: () => h('dl', { class: 'grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm' }, [
+              ['状态', h(StatusBadge, { status: l.status })],
+              ['租户', tenant ? tenant.name : l.tenantId],
+              ['模板', tpl ? h('a', { class: 'text-indigo-600 hover:underline cursor-pointer', onClick: () => navigate(`/templates/${tpl.id}`) }, tpl.name) : l.templateId],
+              ['手机号', h('span', { class: 'font-mono' }, l.mobile)],
+              ['渠道', l.channel === 'aliyun' ? '阿里云短信' : '腾讯云短信'],
+              ['重试次数', `${l.retryCount} / 3`],
+              ['创建时间', l.createdAt],
+              ['失败原因', l.failReason || '—'],
+            ].map(([k, v]) => h('div', { class: 'flex' }, [
+              h('dt', { class: 'w-24 text-slate-500' }, k),
+              h('dd', { class: 'flex-1' }, v),
+            ])))
+          }),
+          h(Card, { title: '发送轨迹' }, {
+            default: () => h('ol', { class: 'space-y-3' }, [
+              { time: l.createdAt, label: '已入队', tone: 'sky' },
+              { time: l.createdAt.replace(/:(\d\d)$/, (_, s) => ':' + String(Number(s)+1).padStart(2,'0')), label: '开始发送', tone: 'sky' },
+              ...(l.retryCount > 0 ? [{ time: l.createdAt.replace(/:(\d\d)$/, (_, s) => ':' + String(Number(s)+2).padStart(2,'0')), label: `第 ${l.retryCount} 次重试`, tone: 'amber' }] : []),
+              { time: l.createdAt.replace(/:(\d\d)$/, (_, s) => ':' + String(Number(s)+3).padStart(2,'0')), label: l.status === 'success' ? '发送成功' : l.status === 'failed' ? '最终失败' : '处理中', tone: l.status === 'success' ? 'emerald' : l.status === 'failed' ? 'rose' : 'sky' },
+            ].map((step, i) => h('li', { class: 'flex items-start gap-3' }, [
+              h('div', { class: `w-2 h-2 rounded-full mt-1.5 bg-${step.tone}-500 ring-4 ring-${step.tone}-100` }),
+              h('div', null, [
+                h('p', { class: 'text-sm font-medium' }, step.label),
+                h('p', { class: 'text-xs text-slate-400 mt-0.5 font-mono' }, step.time),
+              ]),
+            ])))
+          }),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 渠道配置 ----------
+  const PageChannelConfig = {
+    setup() {
+      return () => h(Card, { title: '短信渠道', subtitle: '按优先级调度,主渠道故障时自动降级' }, {
+        actions: () => h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700' }, '接入新渠道'),
+        default: () => h('div', { class: 'space-y-3' }, store.channels.map(c =>
+          h('div', { class: 'border border-slate-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', { class: 'flex items-center gap-4' }, [
+              h('div', { class: 'w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold' }, c.code[0].toUpperCase()),
+              h('div', null, [
+                h('p', { class: 'font-medium text-slate-800' }, c.name),
+                h('p', { class: 'text-xs text-slate-400 font-mono mt-0.5' }, c.apiKey),
+              ]),
+            ]),
+            h('div', { class: 'flex items-center gap-6' }, [
+              h('div', { class: 'text-sm' }, [
+                h('p', { class: 'text-xs text-slate-400' }, '优先级'),
+                h('p', { class: 'font-medium' }, '#' + c.priority),
+              ]),
+              h('div', { class: 'text-sm' }, [
+                h('p', { class: 'text-xs text-slate-400' }, '成功率'),
+                h('p', { class: 'font-medium' }, c.successRate + '%'),
+              ]),
+              h(StatusBadge, { status: c.status }),
+              h('button', { class: 'text-indigo-600 hover:text-indigo-700 text-sm font-medium' }, '编辑'),
+            ]),
+          ])
+        ))
+      });
+    }
+  };
+
+  // ---------- API Key 管理 ----------
+  const PageApiKey = {
+    setup() {
+      const showFull = reactive({});
+      return () => h(Card, { title: 'API Key 管理', subtitle: '每个租户独立 API Key,接入短信服务时通过 Header X-API-Key 传递' }, {
+        actions: () => h('button', { class: 'px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700' }, '生成新 Key'),
+        default: () => h('div', { class: 'overflow-x-auto' },
+          h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+            h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+              h('tr', null, ['Key ID', '租户', 'API Key', '创建时间', '最近使用', '状态', ''].map(t =>
+                h('th', { class: 'px-3 py-2.5 text-left font-medium' }, t)
+              ))
+            ),
+            h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, store.apiKeys.map(k =>
+              h('tr', { class: 'hover:bg-slate-50' }, [
+                h('td', { class: 'px-3 py-2.5 font-mono text-xs text-slate-500' }, k.id),
+                h('td', { class: 'px-3 py-2.5' }, k.tenantName),
+                h('td', { class: 'px-3 py-2.5 font-mono text-xs' }, k.apiKey),
+                h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, k.createdAt),
+                h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, k.lastUsed),
+                h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: k.status })),
+                h('td', { class: 'px-3 py-2.5' }, h('div', { class: 'flex gap-2' }, [
+                  h('button', { class: 'text-indigo-600 hover:text-indigo-700 text-xs font-medium' }, '重置'),
+                  h('button', { class: 'text-rose-600 hover:text-rose-700 text-xs font-medium' }, '禁用'),
+                ])),
+              ])
+            ))
+          ])
+        )
+      });
+    }
+  };
+
+  // ============================================================
+  // 5. 页面映射 / 侧栏 / 面包屑
+  // ============================================================
+  const PAGES = {
+    'dashboard': { comp: PageDashboard, title: '服务总览', group: '概览', hash: '/dashboard' },
+    'template-list': { comp: PageTemplateList, title: '模板列表', group: '模板管理', hash: '/templates' },
+    'template-detail': { comp: PageTemplateDetail, title: '模板详情', group: '模板管理', hash: '/templates/TPL001', parent: 'template-list' },
+    'template-edit': { comp: PageTemplateEdit, title: '新建/编辑模板', group: '模板管理', hash: '/templates/edit/new', parent: 'template-list' },
+    'template-review': { comp: PageTemplateReview, title: '模板审核', group: '模板管理', hash: '/templates/review' },
+    'signature-list': { comp: PageSignatureList, title: '签名管理', group: '模板管理', hash: '/signatures' },
+    'quota-list': { comp: PageQuotaList, title: '租户配额', group: '配额管理', hash: '/quotas' },
+    'quota-edit': { comp: PageQuotaEdit, title: '调整配额', group: '配额管理', hash: '/quotas/edit/T001', parent: 'quota-list' },
+    'send-log': { comp: PageSendLog, title: '发送日志', group: '监控', hash: '/logs' },
+    'log-detail': { comp: PageLogDetail, title: '日志详情', group: '监控', hash: '/logs/M20260511001', parent: 'send-log' },
+    'channel-config': { comp: PageChannelConfig, title: '短信渠道', group: '系统', hash: '/channels' },
+    'api-key': { comp: PageApiKey, title: 'API Key 管理', group: '系统', hash: '/api-keys' },
+  };
+
+  const SIDEBAR_GROUPS = [
+    { group: '概览', items: [{ name: 'dashboard', label: '服务总览', icon: '▦' }] },
+    { group: '模板管理', items: [
+      { name: 'template-list', label: '模板列表', icon: '▤' },
+      { name: 'template-review', label: '模板审核', icon: '✓' },
+      { name: 'signature-list', label: '签名管理', icon: '✎' },
+    ]},
+    { group: '配额管理', items: [{ name: 'quota-list', label: '租户配额', icon: '◔' }] },
+    { group: '监控', items: [{ name: 'send-log', label: '发送日志', icon: '⌗' }] },
+    { group: '系统', items: [
+      { name: 'channel-config', label: '短信渠道', icon: '⇄' },
+      { name: 'api-key', label: 'API Key 管理', icon: '⚿' },
+    ]},
+  ];
+
+  function isItemActive(name) {
+    if (route.name === name) return true;
+    const cur = PAGES[route.name];
+    return cur && cur.parent === name;
+  }
+
+  const Sidebar = {
+    props: ['mobileOpen'],
+    emits: ['close'],
+    setup(props, { emit }) {
+      return () => h('aside', {
+        class: [
+          'fixed lg:sticky top-0 left-0 h-screen w-64 lg:w-60 bg-white border-r border-slate-200 z-40 transform transition-transform',
+          props.mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        ].join(' '),
+      }, [
+        h('div', { class: 'h-16 px-5 flex items-center border-b border-slate-200' }, [
+          h('div', { class: 'w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm mr-3' }, 'SMS'),
+          h('div', null, [
+            h('p', { class: 'text-sm font-semibold text-slate-800 leading-tight' }, '短信微服务'),
+            h('p', { class: 'text-xs text-slate-400 leading-tight' }, 'F-101 Prototype'),
+          ]),
+        ]),
+        h('nav', { class: 'p-3 overflow-y-auto scrollbar-thin', style: { height: 'calc(100vh - 4rem)' } },
+          SIDEBAR_GROUPS.map(g => h('div', { class: 'mb-4' }, [
+            h('p', { class: 'px-3 mb-1.5 text-xs font-medium text-slate-400 uppercase tracking-wide' }, g.group),
+            h('ul', { class: 'space-y-0.5' }, g.items.map(item => {
+              const active = isItemActive(item.name);
+              return h('li', null, h('a', {
+                class: [
+                  'flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors',
+                  active ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-50',
+                ].join(' '),
+                onClick: () => { navigate(PAGES[item.name].hash); emit('close'); },
+              }, [
+                h('span', { class: 'w-5 text-center text-base' }, item.icon),
+                h('span', null, item.label),
+              ]));
+            }))
+          ]))
+        ),
+      ]);
+    }
+  };
+
+  const TopBar = {
+    emits: ['toggle-menu'],
+    setup(_, { emit }) {
+      return () => h('header', { class: 'h-16 bg-white border-b border-slate-200 px-4 lg:px-6 flex items-center justify-between sticky top-0 z-30' }, [
+        h('div', { class: 'flex items-center gap-3' }, [
+          h('button', { class: 'lg:hidden w-9 h-9 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600', onClick: () => emit('toggle-menu') },
+            h('span', { class: 'text-xl' }, '☰')
+          ),
+          h('div', null, [
+            h('p', { class: 'text-xs text-slate-400' }, (PAGES[route.name] || {}).group || ''),
+            h('p', { class: 'text-base font-semibold text-slate-800' }, (PAGES[route.name] || {}).title || ''),
+          ]),
+        ]),
+        h('div', { class: 'flex items-center gap-3' }, [
+          h('div', { class: 'hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium' }, [
+            h('span', { class: 'w-1.5 h-1.5 rounded-full bg-emerald-500' }),
+            h('span', null, '服务运行中'),
+          ]),
+          h('div', { class: 'w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-medium' }, '运'),
+        ]),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 6. 全局模式 overlay
+  // ============================================================
+  const GlobalOverview = {
+    props: ['open'],
+    emits: ['close'],
+    setup(props, { emit }) {
+      const zoom = ref(0.25);
+      const escHandler = (e) => { if (e.key === 'Escape') emit('close'); };
+      watch(() => props.open, (v) => {
+        if (v) document.addEventListener('keydown', escHandler);
+        else document.removeEventListener('keydown', escHandler);
+      });
+      onUnmounted(() => document.removeEventListener('keydown', escHandler));
+
+      const pageList = Object.keys(PAGES).map(name => ({ name, ...PAGES[name] }));
+
+      return () => h('div', {
+        class: [
+          'fixed inset-0 bg-slate-900/95 z-50 transition-opacity duration-200',
+          props.open ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        ].join(' '),
+      }, [
+        h('div', { class: 'h-16 px-6 flex items-center justify-between border-b border-slate-700' }, [
+          h('div', { class: 'text-white' }, [
+            h('p', { class: 'text-sm font-semibold' }, '全局模式 · F-101 短信微服务'),
+            h('p', { class: 'text-xs text-slate-400 mt-0.5' }, `${pageList.length} 个页面 · 点击缩略图进入对应页面 · Esc 关闭`),
+          ]),
+          h('div', { class: 'flex items-center gap-4' }, [
+            h('div', { class: 'flex items-center gap-2 text-white text-xs' }, [
+              h('span', null, '缩放'),
+              h('input', { type: 'range', min: '0.15', max: '0.5', step: '0.01', value: zoom.value, onInput: e => zoom.value = parseFloat(e.target.value), class: 'w-32' }),
+              h('span', { class: 'font-mono w-10' }, Math.round(zoom.value * 100) + '%'),
+            ]),
+            h('button', { class: 'w-9 h-9 rounded-lg bg-slate-800 text-white hover:bg-slate-700 flex items-center justify-center', onClick: () => emit('close') }, '✕'),
+          ]),
+        ]),
+        h('div', { class: 'p-6 overflow-y-auto scrollbar-thin', style: { height: 'calc(100vh - 4rem)' } },
+          h('div', { class: 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5' },
+            pageList.map(p => h('div', {
+              class: 'cursor-pointer group',
+              onClick: () => { navigate(p.hash); emit('close'); },
+            }, [
+              h('div', { class: 'aspect-[16/10] overflow-hidden bg-white rounded-lg ring-1 ring-slate-700 group-hover:ring-2 group-hover:ring-indigo-400 transition relative' }, [
+                h('div', {
+                  class: 'thumb-wrap thumb-frame',
+                  style: { transform: `scale(${zoom.value * 0.42})` },
+                }, h(ThumbnailPage, { pageName: p.name })),
+              ]),
+              h('p', { class: 'mt-2 text-sm text-white font-medium' }, p.title),
+              h('p', { class: 'text-xs text-slate-400 mt-0.5' }, p.group),
+            ]))
+          )
+        ),
+      ]);
+    }
+  };
+
+  // 缩略图独立渲染:用一个简化的布局,让页面组件在固定尺寸内渲染
+  const ThumbnailPage = {
+    props: ['pageName'],
+    setup(props) {
+      const page = computed(() => PAGES[props.pageName]);
+      return () => h('div', { class: 'w-full h-full bg-slate-50 flex' }, [
+        h('div', { class: 'w-60 bg-white border-r border-slate-200 flex-shrink-0' }, [
+          h('div', { class: 'h-16 px-5 flex items-center border-b border-slate-200' }, [
+            h('div', { class: 'w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm mr-3' }, 'SMS'),
+            h('div', null, [
+              h('p', { class: 'text-sm font-semibold text-slate-800' }, '短信微服务'),
+              h('p', { class: 'text-xs text-slate-400' }, 'F-101'),
+            ]),
+          ]),
+          h('div', { class: 'p-3' }, SIDEBAR_GROUPS.map(g => h('div', { class: 'mb-3' }, [
+            h('p', { class: 'px-3 mb-1 text-xs font-medium text-slate-400 uppercase' }, g.group),
+            g.items.map(i => h('div', {
+              class: ['flex items-center gap-2 px-3 py-2 rounded-lg text-sm', i.name === page.value.parent || i.name === props.pageName ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600'].join(' ')
+            }, [h('span', null, i.icon), h('span', null, i.label)]))
+          ]))),
+        ]),
+        h('div', { class: 'flex-1 flex flex-col' }, [
+          h('div', { class: 'h-16 bg-white border-b border-slate-200 px-6 flex items-center' }, [
+            h('div', null, [
+              h('p', { class: 'text-xs text-slate-400' }, page.value.group),
+              h('p', { class: 'text-base font-semibold text-slate-800' }, page.value.title),
+            ]),
+          ]),
+          h('div', { class: 'flex-1 p-6 overflow-hidden' }, h(page.value.comp)),
+        ]),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 7. 根组件
+  // ============================================================
+  const App = {
+    setup() {
+      const mobileMenu = ref(false);
+      const globalMode = ref(false);
+      onMounted(() => { syncRoute(); });
+      const breadcrumb = computed(() => {
+        const cur = PAGES[route.name];
+        if (!cur) return [];
+        const trail = [{ label: cur.group }];
+        if (cur.parent) trail.push({ label: PAGES[cur.parent].title, hash: PAGES[cur.parent].hash });
+        trail.push({ label: cur.title });
+        return trail;
+      });
+      return () => h('div', { class: 'min-h-screen flex bg-slate-50' }, [
+        h(Sidebar, { mobileOpen: mobileMenu.value, onClose: () => mobileMenu.value = false }),
+        // 移动端遮罩
+        mobileMenu.value && h('div', { class: 'fixed inset-0 bg-slate-900/40 z-30 lg:hidden', onClick: () => mobileMenu.value = false }),
+        h('div', { class: 'flex-1 min-w-0 flex flex-col' }, [
+          h(TopBar, { onToggleMenu: () => mobileMenu.value = !mobileMenu.value }),
+          // 面包屑
+          h('nav', { class: 'bg-slate-50 px-4 lg:px-6 py-3 text-xs text-slate-500' },
+            h('div', { class: 'flex items-center gap-1.5 flex-wrap' },
+              breadcrumb.value.map((b, i, arr) => [
+                b.hash
+                  ? h('a', { class: 'hover:text-indigo-600 cursor-pointer', onClick: () => navigate(b.hash) }, b.label)
+                  : h('span', { class: i === arr.length - 1 ? 'text-slate-700 font-medium' : '' }, b.label),
+                i < arr.length - 1 && h('span', { class: 'text-slate-300' }, '/'),
+              ]).flat()
+            )
+          ),
+          h('main', { class: 'flex-1 p-4 lg:p-6' }, h(PAGES[route.name] ? PAGES[route.name].comp : PageDashboard)),
+        ]),
+        // 全局模式悬浮按钮 - 仅 lg 及以上
+        h('button', {
+          class: 'fixed bottom-6 right-6 w-14 h-14 rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 hidden lg:flex items-center justify-center text-lg z-40',
+          onClick: () => globalMode.value = true,
+          title: '打开全局模式',
+        }, [
+          h('div', { class: 'grid grid-cols-3 gap-0.5 w-5 h-5' }, Array.from({length:9}, () => h('div', { class: 'bg-white rounded-sm' }))),
+        ]),
+        h(GlobalOverview, { open: globalMode.value, onClose: () => globalMode.value = false }),
+      ]);
+    }
+  };
+
+  const app = createApp(App);
+  app.component('StatusBadge', StatusBadge);
+  app.component('Card', Card);
+  app.mount('#app');
+  </script>
+</body>
+</html>
