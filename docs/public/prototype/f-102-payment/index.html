@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>F-102 支付架构重构 · 原型</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .thumb-frame { transform-origin: top left; pointer-events: none; }
+    .thumb-wrap { width: 1440px; height: 900px; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-700">
+  <div id="app" v-cloak></div>
+
+  <script>
+  const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch, h } = Vue;
+
+  // ============================================================
+  // 1. Mock 数据
+  // ============================================================
+  const store = reactive({
+    configs: [
+      { id: 'PC001', name: '总部微信分账(平台15%+加盟商85%)', mode: 'wechat_split', status: 'active', boundSiteCount: 12, createdAt: '2026-03-10',
+        params: { mchId: '1900012***', subMchId: '1612345***', apiKey: 'xxxx***xxxx' },
+        splitRule: { type: 'ratio', receivers: [
+          { type: 'platform', name: '平台方', mchId: '1900001***', value: 15 },
+          { type: 'franchisee', name: '加盟商', mchId: '1612345***', value: 85 },
+        ] }
+      },
+      { id: 'PC002', name: '华东区微信分账(三方分账)', mode: 'wechat_split', status: 'active', boundSiteCount: 8, createdAt: '2026-03-25',
+        params: { mchId: '1900012***', subMchId: '1612346***', apiKey: 'yyyy***yyyy' },
+        splitRule: { type: 'ratio', receivers: [
+          { type: 'platform', name: '平台方', mchId: '1900001***', value: 10 },
+          { type: 'franchisee', name: '加盟商', mchId: '1612346***', value: 80 },
+          { type: 'supplier', name: '设备供应商', mchId: '1612350***', value: 10 },
+        ] }
+      },
+      { id: 'PC003', name: '直营店微信直收', mode: 'wechat_direct', status: 'active', boundSiteCount: 5, createdAt: '2026-04-02',
+        params: { mchId: '1900012***', subMchId: '1612347***', apiKey: 'zzzz***zzzz' } },
+      { id: 'PC004', name: '总部支付宝直收', mode: 'alipay', status: 'active', boundSiteCount: 18, createdAt: '2026-04-12',
+        params: { appId: '2021***6541', pid: '2088***3322', publicKey: 'MIIBIj***IDAQAB', privateKey: '***' } },
+      { id: 'PC005', name: '华南区支付宝直收', mode: 'alipay', status: 'active', boundSiteCount: 4, createdAt: '2026-04-20',
+        params: { appId: '2021***7821', pid: '2088***5566', publicKey: 'MIIBIj***IDAQAB', privateKey: '***' } },
+      { id: 'PC006', name: '测试用微信分账(已停用)', mode: 'wechat_split', status: 'inactive', boundSiteCount: 0, createdAt: '2026-01-08',
+        params: { mchId: '1900099***', subMchId: '1699999***', apiKey: 'test***test' },
+        splitRule: { type: 'fixed', receivers: [
+          { type: 'platform', name: '平台方', mchId: '1900001***', value: 2 },
+          { type: 'franchisee', name: '加盟商', mchId: '1699999***', value: 18 },
+        ] }
+      },
+    ],
+    sites: [
+      { id: 'S001', name: '上海徐汇店', address: '上海市徐汇区漕溪北路 1023 号', wechatConfigId: 'PC001', alipayConfigId: 'PC004' },
+      { id: 'S002', name: '上海浦东店', address: '上海市浦东新区张江路 56 号', wechatConfigId: 'PC001', alipayConfigId: 'PC004' },
+      { id: 'S003', name: '杭州西湖店', address: '杭州市西湖区文三路 200 号', wechatConfigId: 'PC002', alipayConfigId: 'PC004' },
+      { id: 'S004', name: '杭州滨江店', address: '杭州市滨江区江南大道 88 号', wechatConfigId: 'PC002', alipayConfigId: null },
+      { id: 'S005', name: '广州天河店', address: '广州市天河区珠江新城', wechatConfigId: 'PC003', alipayConfigId: 'PC005' },
+      { id: 'S006', name: '深圳南山店', address: '深圳市南山区科技园', wechatConfigId: 'PC003', alipayConfigId: 'PC005' },
+    ],
+    orders: [
+      { id: 'ORD20260511001', siteId: 'S001', siteName: '上海徐汇店', channel: 'wechat', amount: 20, payStatus: 'paid', splitStatus: 'completed', createdAt: '2026-05-11 14:32', userId: 'U10023' },
+      { id: 'ORD20260511002', siteId: 'S001', siteName: '上海徐汇店', channel: 'alipay', amount: 15, payStatus: 'paid', splitStatus: 'n/a', createdAt: '2026-05-11 14:30', userId: 'U10024' },
+      { id: 'ORD20260511003', siteId: 'S003', siteName: '杭州西湖店', channel: 'wechat', amount: 25, payStatus: 'paid', splitStatus: 'failed', createdAt: '2026-05-11 14:28', userId: 'U10025' },
+      { id: 'ORD20260511004', siteId: 'S005', siteName: '广州天河店', channel: 'wechat', amount: 18, payStatus: 'paid', splitStatus: 'n/a', createdAt: '2026-05-11 14:25', userId: 'U10026' },
+      { id: 'ORD20260511005', siteId: 'S002', siteName: '上海浦东店', channel: 'wechat', amount: 22, payStatus: 'refunded', splitStatus: 'reverted', createdAt: '2026-05-11 14:20', userId: 'U10027' },
+      { id: 'ORD20260511006', siteId: 'S004', siteName: '杭州滨江店', channel: 'wechat', amount: 30, payStatus: 'paid', splitStatus: 'pending', createdAt: '2026-05-11 14:18', userId: 'U10028' },
+      { id: 'ORD20260511007', siteId: 'S003', siteName: '杭州西湖店', channel: 'alipay', amount: 12, payStatus: 'paid', splitStatus: 'n/a', createdAt: '2026-05-11 14:15', userId: 'U10029' },
+      { id: 'ORD20260511008', siteId: 'S006', siteName: '深圳南山店', channel: 'alipay', amount: 28, payStatus: 'paying', splitStatus: 'n/a', createdAt: '2026-05-11 14:12', userId: 'U10030' },
+    ],
+    splits: [
+      { id: 'SP001', orderId: 'ORD20260511001', amount: 20, status: 'completed', retryCount: 0, createdAt: '2026-05-11 14:32:30',
+        receivers: [{ type: 'platform', name: '平台方', amount: 3, status: 'success' }, { type: 'franchisee', name: '加盟商', amount: 17, status: 'success' }] },
+      { id: 'SP002', orderId: 'ORD20260511003', amount: 25, status: 'failed', retryCount: 5, createdAt: '2026-05-11 14:28:20',
+        receivers: [{ type: 'platform', name: '平台方', amount: 2.5, status: 'success' }, { type: 'franchisee', name: '加盟商', amount: 20, status: 'failed' }, { type: 'supplier', name: '设备供应商', amount: 2.5, status: 'pending' }] },
+      { id: 'SP003', orderId: 'ORD20260511005', amount: 22, status: 'reverted', retryCount: 0, createdAt: '2026-05-11 14:20:15',
+        receivers: [{ type: 'platform', name: '平台方', amount: 3.3, status: 'reverted' }, { type: 'franchisee', name: '加盟商', amount: 18.7, status: 'reverted' }] },
+      { id: 'SP004', orderId: 'ORD20260511006', amount: 30, status: 'pending', retryCount: 1, createdAt: '2026-05-11 14:18:50',
+        receivers: [{ type: 'platform', name: '平台方', amount: 3, status: 'pending' }, { type: 'franchisee', name: '加盟商', amount: 24, status: 'pending' }, { type: 'supplier', name: '设备供应商', amount: 3, status: 'pending' }] },
+    ],
+    refunds: [
+      { id: 'RF001', orderId: 'ORD20260511005', amount: 22, channel: 'wechat', reason: '用户取消', status: 'success', createdAt: '2026-05-11 14:20:45', operator: '客服小张' },
+      { id: 'RF002', orderId: 'ORD20260510088', amount: 15, channel: 'alipay', reason: '设备故障', status: 'success', createdAt: '2026-05-10 18:23:10', operator: '客服小李' },
+      { id: 'RF003', orderId: 'ORD20260510120', amount: 8, channel: 'wechat', reason: '重复扣款', status: 'processing', createdAt: '2026-05-10 20:05:32', operator: '客服小王' },
+    ],
+    changeLogs: [
+      { id: 'CL001', operator: '运营管理员-张三', target: 'PC002', targetName: '华东区微信分账', action: 'update', field: '分账规则', detail: '加盟商比例 85% → 80%,新增供应商 10%', createdAt: '2026-04-25 10:15' },
+      { id: 'CL002', operator: '运营管理员-李四', target: 'S004', targetName: '杭州滨江店', action: 'bind', field: '微信渠道绑定', detail: '绑定配置 PC002', createdAt: '2026-04-20 14:32' },
+      { id: 'CL003', operator: '运营管理员-张三', target: 'PC006', targetName: '测试用微信分账', action: 'disable', field: '配置状态', detail: '已启用 → 已停用', createdAt: '2026-04-15 09:08' },
+      { id: 'CL004', operator: '运营管理员-王五', target: 'S005', targetName: '广州天河店', action: 'bind', field: '支付宝渠道绑定', detail: '绑定配置 PC005', createdAt: '2026-04-12 16:50' },
+    ],
+    alerts: [
+      { id: 'AL001', level: 'critical', title: '分账失败重试 5 次,需人工介入', detail: '订单 ORD20260511003 分账失败 5 次,接收方账户异常', target: 'SP002', status: 'open', createdAt: '2026-05-11 14:34' },
+      { id: 'AL002', level: 'warning', title: '支付宝异步通知延迟', detail: '广州天河店支付宝通知延迟超过 30 秒', target: 'S005', status: 'open', createdAt: '2026-05-11 12:18' },
+      { id: 'AL003', level: 'info', title: '配置变更已生效', detail: 'PC002 分账规则更新,12 个网点已应用', target: 'PC002', status: 'resolved', createdAt: '2026-04-25 10:16' },
+    ],
+    metrics: {
+      todayAmount: 12830,
+      todayOrderCount: 542,
+      todaySplitCount: 318,
+      todayRefundCount: 7,
+      splitSuccessRate: 99.4,
+      activeConfigs: 5,
+      boundSites: 6,
+      openAlerts: 2,
+    },
+  });
+
+  // ============================================================
+  // 2. 路由
+  // ============================================================
+  const route = reactive({ name: 'dashboard', params: {} });
+
+  function parseHash() {
+    const hash = location.hash.replace(/^#/, '') || '/dashboard';
+    const seg = hash.split('/').filter(Boolean);
+    if (seg.length === 0) return { name: 'dashboard', params: {} };
+    if (seg[0] === 'dashboard') return { name: 'dashboard', params: {} };
+    if (seg[0] === 'configs') {
+      if (!seg[1]) return { name: 'config-list', params: {} };
+      if (seg[1] === 'edit') {
+        const mode = seg[2]; const id = seg[3];
+        if (mode === 'wechat-split') return { name: 'config-edit-wechat-split', params: { id } };
+        if (mode === 'wechat-direct') return { name: 'config-edit-wechat-direct', params: { id } };
+        if (mode === 'alipay') return { name: 'config-edit-alipay', params: { id } };
+      }
+      if (seg[2] === 'split-rule') return { name: 'split-rule-detail', params: { id: seg[1] } };
+      return { name: 'config-detail', params: { id: seg[1] } };
+    }
+    if (seg[0] === 'sites') {
+      if (!seg[1]) return { name: 'site-list', params: {} };
+      if (seg[2] === 'payment') return { name: 'site-payment', params: { id: seg[1] } };
+    }
+    if (seg[0] === 'orders') {
+      if (!seg[1]) return { name: 'order-list', params: {} };
+      return { name: 'order-detail', params: { id: seg[1] } };
+    }
+    if (seg[0] === 'splits') return { name: 'split-log', params: {} };
+    if (seg[0] === 'refunds') return { name: 'refund-list', params: {} };
+    if (seg[0] === 'change-logs') return { name: 'change-log', params: {} };
+    if (seg[0] === 'alerts') return { name: 'alert-center', params: {} };
+    return { name: 'dashboard', params: {} };
+  }
+
+  function syncRoute() {
+    const r = parseHash();
+    route.name = r.name;
+    route.params = r.params;
+  }
+
+  window.addEventListener('hashchange', syncRoute);
+  const navigate = (path) => { location.hash = path; };
+
+  // ============================================================
+  // 3. 公共组件
+  // ============================================================
+  const StatusBadge = {
+    props: ['status'],
+    setup(props) {
+      const map = {
+        active: { tone: 'emerald', label: '已启用' },
+        inactive: { tone: 'slate', label: '已停用' },
+        completed: { tone: 'emerald', label: '已分账' },
+        pending: { tone: 'sky', label: '待分账' },
+        processing: { tone: 'sky', label: '分账中' },
+        failed: { tone: 'rose', label: '失败' },
+        reverted: { tone: 'slate', label: '已回退' },
+        paid: { tone: 'emerald', label: '已支付' },
+        paying: { tone: 'sky', label: '支付中' },
+        refunded: { tone: 'amber', label: '已退款' },
+        success: { tone: 'emerald', label: '成功' },
+        'n/a': { tone: 'slate', label: '—' },
+        open: { tone: 'rose', label: '未处理' },
+        resolved: { tone: 'emerald', label: '已处理' },
+        critical: { tone: 'rose', label: '严重' },
+        warning: { tone: 'amber', label: '警告' },
+        info: { tone: 'sky', label: '提示' },
+      };
+      return () => {
+        const c = map[props.status] || { tone: 'slate', label: props.status };
+        const cls = {
+          emerald: 'bg-emerald-100 text-emerald-700',
+          rose: 'bg-rose-100 text-rose-700',
+          amber: 'bg-amber-100 text-amber-700',
+          sky: 'bg-sky-100 text-sky-700',
+          slate: 'bg-slate-100 text-slate-600',
+        }[c.tone];
+        return h('span', { class: `inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cls}` }, c.label);
+      };
+    }
+  };
+
+  const ChannelBadge = {
+    props: ['channel'],
+    setup(props) {
+      return () => {
+        if (props.channel === 'wechat') return h('span', { class: 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700' }, ['微信']);
+        if (props.channel === 'alipay') return h('span', { class: 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-700' }, ['支付宝']);
+        return h('span', null, '—');
+      };
+    }
+  };
+
+  const ModeBadge = {
+    props: ['mode'],
+    setup(props) {
+      return () => {
+        const map = {
+          wechat_split: { label: '微信分账', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+          wechat_direct: { label: '微信直收', cls: 'bg-teal-50 text-teal-700 ring-teal-200' },
+          alipay: { label: '支付宝直收', cls: 'bg-sky-50 text-sky-700 ring-sky-200' },
+        };
+        const m = map[props.mode] || { label: props.mode, cls: 'bg-slate-50 text-slate-700' };
+        return h('span', { class: `inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ${m.cls}` }, m.label);
+      };
+    }
+  };
+
+  const Card = {
+    props: ['title', 'subtitle'],
+    setup(props, { slots }) {
+      return () => h('div', { class: 'bg-white rounded-xl shadow-sm border border-slate-200 p-5 lg:p-6' }, [
+        (props.title || props.subtitle || slots.actions) && h('div', { class: 'mb-4 flex flex-wrap items-center justify-between gap-2' }, [
+          h('div', null, [
+            props.title && h('h3', { class: 'text-base font-semibold text-slate-800' }, props.title),
+            props.subtitle && h('p', { class: 'text-xs text-slate-500 mt-1' }, props.subtitle),
+          ]),
+          slots.actions && slots.actions(),
+        ]),
+        slots.default && slots.default(),
+      ]);
+    }
+  };
+
+  const StatCard = {
+    props: ['label', 'value', 'tone', 'hint'],
+    setup(props) {
+      const toneMap = {
+        emerald: 'from-emerald-500 to-emerald-600',
+        sky: 'from-sky-500 to-sky-600',
+        amber: 'from-amber-500 to-amber-600',
+        rose: 'from-rose-500 to-rose-600',
+        slate: 'from-slate-500 to-slate-600',
+      };
+      return () => h('div', { class: 'bg-white rounded-xl shadow-sm border border-slate-200 p-5 relative overflow-hidden' }, [
+        h('p', { class: 'text-xs font-medium text-slate-500' }, props.label),
+        h('p', { class: 'mt-2 text-3xl font-bold text-slate-800' }, props.value),
+        props.hint && h('p', { class: 'mt-1 text-xs text-slate-400' }, props.hint),
+        h('div', { class: `absolute top-0 left-0 h-1 w-full bg-gradient-to-r ${toneMap[props.tone || 'emerald']}` }),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 4. 页面组件 (一)
+  // ============================================================
+
+  // ---------- Dashboard ----------
+  const PageDashboard = {
+    setup() {
+      const m = store.metrics;
+      return () => h('div', { class: 'space-y-6' }, [
+        h('div', { class: 'grid grid-cols-2 lg:grid-cols-4 gap-4' }, [
+          h(StatCard, { label: '今日成交金额', value: '¥' + m.todayAmount.toLocaleString(), tone: 'emerald', hint: m.todayOrderCount + ' 笔订单' }),
+          h(StatCard, { label: '今日分账笔数', value: m.todaySplitCount, tone: 'sky', hint: '成功率 ' + m.splitSuccessRate + '%' }),
+          h(StatCard, { label: '今日退款', value: m.todayRefundCount, tone: 'amber', hint: '退款金额 ¥234' }),
+          h(StatCard, { label: '未处理告警', value: m.openAlerts, tone: 'rose', hint: '点击下方告警卡片查看' }),
+        ]),
+        h('div', { class: 'grid grid-cols-1 lg:grid-cols-3 gap-6' }, [
+          h(Card, { title: '渠道收款占比' }, {
+            default: () => h('div', { class: 'space-y-3' }, [
+              { label: '微信支付', value: 72, color: 'bg-emerald-500' },
+              { label: '支付宝', value: 28, color: 'bg-sky-500' },
+            ].map(c => h('div', null, [
+              h('div', { class: 'flex justify-between text-sm mb-1' }, [
+                h('span', { class: 'font-medium' }, c.label),
+                h('span', { class: 'text-slate-500' }, c.value + '%'),
+              ]),
+              h('div', { class: 'h-2 bg-slate-100 rounded-full overflow-hidden' },
+                h('div', { class: `h-full ${c.color} rounded-full`, style: { width: c.value + '%' } })
+              ),
+            ])))
+          }),
+          h(Card, { title: '最近告警', subtitle: '点击查看详情' }, {
+            default: () => h('div', { class: 'space-y-2.5' }, store.alerts.slice(0, 3).map(a =>
+              h('div', { class: 'flex items-start gap-2 cursor-pointer hover:bg-slate-50 -mx-2 px-2 py-1.5 rounded-lg', onClick: () => navigate('/alerts') }, [
+                h(StatusBadge, { status: a.level }),
+                h('div', { class: 'flex-1 min-w-0' }, [
+                  h('p', { class: 'text-sm font-medium text-slate-700 truncate' }, a.title),
+                  h('p', { class: 'text-xs text-slate-400 mt-0.5' }, a.createdAt),
+                ]),
+              ])
+            ))
+          }),
+          h(Card, { title: '配置健康度' }, {
+            default: () => h('div', { class: 'space-y-3' }, [
+              h('div', { class: 'flex justify-between text-sm' }, [h('span', null, '启用中的配置'), h('span', { class: 'font-semibold text-emerald-600' }, m.activeConfigs + ' 个')]),
+              h('div', { class: 'flex justify-between text-sm' }, [h('span', null, '已绑网点'), h('span', { class: 'font-semibold' }, m.boundSites + ' 个')]),
+              h('div', { class: 'flex justify-between text-sm' }, [h('span', null, '未绑支付宝网点'), h('span', { class: 'font-semibold text-amber-600' }, '1 个')]),
+              h('button', { class: 'w-full mt-2 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100', onClick: () => navigate('/configs') }, '管理配置 →'),
+            ])
+          }),
+        ]),
+        h(Card, { title: '最近订单' }, {
+          actions: () => h('button', { class: 'text-xs text-emerald-600 hover:text-emerald-700 font-medium', onClick: () => navigate('/orders') }, '查看全部 →'),
+          default: () => h('div', { class: 'overflow-x-auto' },
+            h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+              h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                h('tr', null, ['订单号', '网点', '渠道', '金额', '支付', '分账', '时间'].map(t =>
+                  h('th', { class: 'px-3 py-2.5 text-left font-medium' }, t)
+                ))
+              ),
+              h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, store.orders.slice(0, 6).map(o =>
+                h('tr', { class: 'hover:bg-slate-50 cursor-pointer', onClick: () => navigate(`/orders/${o.id}`) }, [
+                  h('td', { class: 'px-3 py-2.5 font-mono text-xs' }, o.id),
+                  h('td', { class: 'px-3 py-2.5' }, o.siteName),
+                  h('td', { class: 'px-3 py-2.5' }, h(ChannelBadge, { channel: o.channel })),
+                  h('td', { class: 'px-3 py-2.5 font-medium' }, '¥' + o.amount),
+                  h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: o.payStatus })),
+                  h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: o.splitStatus })),
+                  h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, o.createdAt.slice(11)),
+                ])
+              ))
+            ])
+          )
+        })
+      ]);
+    }
+  };
+
+  // ---------- 配置列表 ----------
+  const PageConfigList = {
+    setup() {
+      const filterMode = ref('all');
+      const filterStatus = ref('all');
+      const list = computed(() => store.configs.filter(c =>
+        (filterMode.value === 'all' || c.mode === filterMode.value) &&
+        (filterStatus.value === 'all' || c.status === filterStatus.value)
+      ));
+      const showCreate = ref(false);
+      return () => h('div', { class: 'space-y-4' }, [
+        h(Card, { title: '支付配置', subtitle: `共 ${store.configs.length} 个配置,启用 ${store.configs.filter(c => c.status === 'active').length} 个` }, {
+          actions: () => h('div', { class: 'relative' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700', onClick: () => showCreate.value = !showCreate.value }, '新建配置 ▾'),
+            showCreate.value && h('div', { class: 'absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 w-44' },
+              [
+                { label: '微信分账', hash: '/configs/edit/wechat-split' },
+                { label: '微信直收', hash: '/configs/edit/wechat-direct' },
+                { label: '支付宝直收', hash: '/configs/edit/alipay' },
+              ].map(item => h('a', { class: 'block px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer', onClick: () => { showCreate.value = false; navigate(item.hash); } }, item.label))
+            )
+          ]),
+          default: () => h('div', null, [
+            h('div', { class: 'flex flex-wrap gap-3 mb-4 items-center' }, [
+              h('select', { value: filterMode.value, onChange: e => filterMode.value = e.target.value, class: 'rounded-lg border-slate-300 text-xs' }, [
+                h('option', { value: 'all' }, '全部模式'),
+                h('option', { value: 'wechat_split' }, '微信分账'),
+                h('option', { value: 'wechat_direct' }, '微信直收'),
+                h('option', { value: 'alipay' }, '支付宝直收'),
+              ]),
+              h('select', { value: filterStatus.value, onChange: e => filterStatus.value = e.target.value, class: 'rounded-lg border-slate-300 text-xs' }, [
+                h('option', { value: 'all' }, '全部状态'),
+                h('option', { value: 'active' }, '已启用'),
+                h('option', { value: 'inactive' }, '已停用'),
+              ]),
+            ]),
+            h('div', { class: 'hidden md:block overflow-x-auto' },
+              h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+                h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                  h('tr', null, ['配置 ID', '名称', '模式', '状态', '绑定网点数', '创建时间', ''].map(t =>
+                    h('th', { class: 'px-4 py-2.5 text-left font-medium' }, t)
+                  ))
+                ),
+                h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, list.value.map(c =>
+                  h('tr', { class: 'hover:bg-slate-50 cursor-pointer', onClick: () => navigate(`/configs/${c.id}`) }, [
+                    h('td', { class: 'px-4 py-3 font-mono text-xs text-slate-500' }, c.id),
+                    h('td', { class: 'px-4 py-3 font-medium' }, c.name),
+                    h('td', { class: 'px-4 py-3' }, h(ModeBadge, { mode: c.mode })),
+                    h('td', { class: 'px-4 py-3' }, h(StatusBadge, { status: c.status })),
+                    h('td', { class: 'px-4 py-3 text-slate-600' }, c.boundSiteCount + ' 个'),
+                    h('td', { class: 'px-4 py-3 text-slate-500 text-xs' }, c.createdAt),
+                    h('td', { class: 'px-4 py-3' }, h('button', {
+                      class: 'text-emerald-600 hover:text-emerald-700 text-xs font-medium',
+                      onClick: (e) => {
+                        e.stopPropagation();
+                        const map = { wechat_split: 'wechat-split', wechat_direct: 'wechat-direct', alipay: 'alipay' };
+                        navigate(`/configs/edit/${map[c.mode]}/${c.id}`);
+                      }
+                    }, '编辑')),
+                  ])
+                ))
+              ])
+            ),
+            h('div', { class: 'md:hidden space-y-3' }, list.value.map(c =>
+              h('div', { class: 'border border-slate-200 rounded-lg p-3', onClick: () => navigate(`/configs/${c.id}`) }, [
+                h('div', { class: 'flex justify-between items-start gap-2 mb-2' }, [
+                  h('div', { class: 'min-w-0' }, [
+                    h('p', { class: 'font-medium text-sm truncate' }, c.name),
+                    h('p', { class: 'font-mono text-xs text-slate-400 mt-0.5' }, c.id),
+                  ]),
+                  h(StatusBadge, { status: c.status }),
+                ]),
+                h('div', { class: 'flex gap-2 text-xs text-slate-500 mt-2' }, [
+                  h(ModeBadge, { mode: c.mode }),
+                  h('span', null, c.boundSiteCount + ' 个网点'),
+                ]),
+              ])
+            )),
+          ])
+        })
+      ]);
+    }
+  };
+
+  // ---------- 配置详情 ----------
+  const PageConfigDetail = {
+    setup() {
+      const cfg = computed(() => store.configs.find(c => c.id === route.params.id) || store.configs[0]);
+      const boundSites = computed(() => store.sites.filter(s => s.wechatConfigId === cfg.value.id || s.alipayConfigId === cfg.value.id));
+      const toggleStatus = () => { cfg.value.status = cfg.value.status === 'active' ? 'inactive' : 'active'; };
+      return () => {
+        const c = cfg.value;
+        const editHash = `/configs/edit/${{ wechat_split: 'wechat-split', wechat_direct: 'wechat-direct', alipay: 'alipay' }[c.mode]}/${c.id}`;
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('div', { class: 'flex items-center gap-3' }, [
+                h('h2', { class: 'text-xl font-bold text-slate-800' }, c.name),
+                h(ModeBadge, { mode: c.mode }),
+                h(StatusBadge, { status: c.status }),
+              ]),
+              h('p', { class: 'text-xs text-slate-500 mt-1 font-mono' }, c.id),
+            ]),
+            h('div', { class: 'flex gap-2' }, [
+              h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/configs') }, '返回'),
+              h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: toggleStatus }, c.status === 'active' ? '停用' : '启用'),
+              h('button', { class: 'px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700', onClick: () => navigate(editHash) }, '编辑'),
+            ]),
+          ]),
+          h(Card, { title: '渠道参数' }, {
+            default: () => h('dl', { class: 'grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm' },
+              Object.entries(c.params).map(([k, v]) => h('div', { class: 'flex' }, [
+                h('dt', { class: 'w-32 text-slate-500' }, k),
+                h('dd', { class: 'flex-1 font-mono text-xs text-slate-700' }, v),
+              ]))
+            )
+          }),
+          c.mode === 'wechat_split' && c.splitRule && h(Card, { title: '分账规则' }, {
+            actions: () => h('button', { class: 'text-xs text-emerald-600 hover:text-emerald-700 font-medium', onClick: () => navigate(`/configs/${c.id}/split-rule`) }, '查看详情 →'),
+            default: () => h('div', null, [
+              h('p', { class: 'text-sm mb-3' }, '分账方式: ', h('span', { class: 'font-medium' }, c.splitRule.type === 'ratio' ? '按比例' : '按固定金额')),
+              h('div', { class: 'space-y-2' }, c.splitRule.receivers.map(r =>
+                h('div', { class: 'flex items-center justify-between p-3 bg-slate-50 rounded-lg' }, [
+                  h('div', null, [
+                    h('p', { class: 'text-sm font-medium' }, r.name),
+                    h('p', { class: 'text-xs text-slate-400 font-mono mt-0.5' }, r.mchId),
+                  ]),
+                  h('p', { class: 'text-sm font-bold text-emerald-600' }, c.splitRule.type === 'ratio' ? r.value + '%' : '¥' + r.value),
+                ])
+              )),
+            ])
+          }),
+          h(Card, { title: `绑定网点 (${boundSites.value.length})` }, {
+            default: () => boundSites.value.length === 0
+              ? h('p', { class: 'text-sm text-slate-400 text-center py-6' }, '暂无绑定网点')
+              : h('div', { class: 'space-y-2' }, boundSites.value.map(s =>
+                h('div', { class: 'flex items-center justify-between p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50', onClick: () => navigate(`/sites/${s.id}/payment`) }, [
+                  h('div', null, [
+                    h('p', { class: 'text-sm font-medium' }, s.name),
+                    h('p', { class: 'text-xs text-slate-400 mt-0.5' }, s.address),
+                  ]),
+                  h('span', { class: 'text-emerald-600 text-xs font-medium' }, '查看 →'),
+                ])
+              ))
+          }),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 微信分账配置编辑 ----------
+  const PageConfigEditWechatSplit = {
+    setup() {
+      const isNew = computed(() => !route.params.id);
+      const existing = computed(() => store.configs.find(c => c.id === route.params.id));
+      const form = reactive({ name: '', mchId: '', subMchId: '', apiKey: '', splitType: 'ratio', receivers: [{ type: 'platform', name: '平台方', mchId: '', value: 15 }, { type: 'franchisee', name: '加盟商', mchId: '', value: 85 }] });
+      watch(existing, (c) => {
+        if (c) {
+          form.name = c.name; form.mchId = c.params.mchId; form.subMchId = c.params.subMchId; form.apiKey = c.params.apiKey;
+          if (c.splitRule) { form.splitType = c.splitRule.type; form.receivers = JSON.parse(JSON.stringify(c.splitRule.receivers)); }
+        }
+      }, { immediate: true });
+      const addReceiver = () => { if (form.receivers.length < 10) form.receivers.push({ type: 'other', name: '其他', mchId: '', value: 0 }); };
+      const removeReceiver = (i) => { form.receivers.splice(i, 1); };
+      const totalValue = computed(() => form.receivers.reduce((s, r) => s + Number(r.value || 0), 0));
+      const save = () => {
+        const data = { name: form.name, mode: 'wechat_split', params: { mchId: form.mchId, subMchId: form.subMchId, apiKey: form.apiKey }, splitRule: { type: form.splitType, receivers: [...form.receivers] }, status: 'active', boundSiteCount: 0 };
+        if (isNew.value) {
+          const id = 'PC' + String(Math.floor(Math.random() * 900) + 100);
+          store.configs.unshift({ id, ...data, createdAt: '2026-05-11' });
+          store.changeLogs.unshift({ id: 'CL' + Date.now(), operator: '当前用户', target: id, targetName: form.name, action: 'create', field: '配置创建', detail: '新建微信分账配置', createdAt: '2026-05-11 14:35' });
+          navigate(`/configs/${id}`);
+        } else { Object.assign(existing.value, data); navigate(`/configs/${existing.value.id}`); }
+      };
+      return () => h('div', { class: 'space-y-6 max-w-3xl' }, [
+        h(Card, { title: isNew.value ? '新建微信分账配置' : '编辑微信分账配置' }, {
+          default: () => h('div', { class: 'space-y-4' }, [
+            h('div', null, [
+              h('label', { class: 'block text-xs text-slate-500 mb-1' }, '配置名称 *'),
+              h('input', { type: 'text', value: form.name, onInput: e => form.name = e.target.value, placeholder: '如:总部微信分账(平台15%+加盟商85%)', class: 'w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500' }),
+            ]),
+            h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
+              h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '服务商商户号 *'), h('input', { value: form.mchId, onInput: e => form.mchId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+              h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '子商户号 *'), h('input', { value: form.subMchId, onInput: e => form.subMchId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+            ]),
+            h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, 'API 密钥 *'), h('input', { type: 'password', value: form.apiKey, onInput: e => form.apiKey = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          ])
+        }),
+        h(Card, { title: '分账规则' }, {
+          default: () => h('div', { class: 'space-y-4' }, [
+            h('div', null, [
+              h('label', { class: 'block text-xs text-slate-500 mb-2' }, '分账方式 *'),
+              h('div', { class: 'flex gap-3' }, [
+                h('label', { class: 'flex items-center gap-2 text-sm' }, [h('input', { type: 'radio', checked: form.splitType === 'ratio', onChange: () => form.splitType = 'ratio', class: 'text-emerald-600 focus:ring-emerald-500' }), '按比例']),
+                h('label', { class: 'flex items-center gap-2 text-sm' }, [h('input', { type: 'radio', checked: form.splitType === 'fixed', onChange: () => form.splitType = 'fixed', class: 'text-emerald-600 focus:ring-emerald-500' }), '按固定金额']),
+              ]),
+            ]),
+            h('div', null, [
+              h('div', { class: 'flex items-center justify-between mb-2' }, [
+                h('label', { class: 'text-xs text-slate-500' }, `接收方列表 (${form.receivers.length}/10)`),
+                h('button', { class: 'text-xs text-emerald-600 hover:text-emerald-700 font-medium', onClick: addReceiver }, '+ 添加接收方'),
+              ]),
+              h('div', { class: 'space-y-2' }, form.receivers.map((r, i) =>
+                h('div', { class: 'grid grid-cols-12 gap-2 items-center p-3 bg-slate-50 rounded-lg' }, [
+                  h('select', { class: 'col-span-3 rounded-lg border-slate-300 text-xs', value: r.type, onChange: e => r.type = e.target.value }, [
+                    h('option', { value: 'platform' }, '平台'),
+                    h('option', { value: 'franchisee' }, '加盟商'),
+                    h('option', { value: 'supplier' }, '供应商'),
+                    h('option', { value: 'other' }, '其他'),
+                  ]),
+                  h('input', { class: 'col-span-5 rounded-lg border-slate-300 text-xs font-mono', placeholder: '商户号', value: r.mchId, onInput: e => r.mchId = e.target.value }),
+                  h('div', { class: 'col-span-3 flex items-center gap-1' }, [
+                    h('input', { type: 'number', class: 'flex-1 rounded-lg border-slate-300 text-xs', value: r.value, onInput: e => r.value = Number(e.target.value) }),
+                    h('span', { class: 'text-xs text-slate-400' }, form.splitType === 'ratio' ? '%' : '元'),
+                  ]),
+                  h('button', { class: 'col-span-1 text-rose-500 text-xs hover:text-rose-700', onClick: () => removeReceiver(i) }, '✕'),
+                ])
+              )),
+              form.splitType === 'ratio' && h('p', { class: ['mt-2 text-xs', totalValue.value === 100 ? 'text-emerald-600' : 'text-rose-500'].join(' ') }, `当前合计 ${totalValue.value}%,${totalValue.value === 100 ? '校验通过' : '需精确等于 100%'}`),
+            ]),
+          ])
+        }),
+        h('div', { class: 'flex gap-2' }, [
+          h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/configs') }, '取消'),
+          h('button', { class: 'px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700', onClick: save }, '保存'),
+        ]),
+      ]);
+    }
+  };
+
+  // ---------- 微信直收配置编辑 ----------
+  const PageConfigEditWechatDirect = {
+    setup() {
+      const isNew = computed(() => !route.params.id);
+      const existing = computed(() => store.configs.find(c => c.id === route.params.id));
+      const form = reactive({ name: '', mchId: '', subMchId: '', apiKey: '', callbackUrl: 'https://api.example.com/wechat/callback' });
+      watch(existing, (c) => { if (c) { form.name = c.name; form.mchId = c.params.mchId; form.subMchId = c.params.subMchId; form.apiKey = c.params.apiKey; } }, { immediate: true });
+      const save = () => {
+        const data = { name: form.name, mode: 'wechat_direct', params: { mchId: form.mchId, subMchId: form.subMchId, apiKey: form.apiKey }, status: 'active', boundSiteCount: 0 };
+        if (isNew.value) {
+          const id = 'PC' + String(Math.floor(Math.random() * 900) + 100);
+          store.configs.unshift({ id, ...data, createdAt: '2026-05-11' });
+          navigate(`/configs/${id}`);
+        } else { Object.assign(existing.value, data); navigate(`/configs/${existing.value.id}`); }
+      };
+      return () => h(Card, { title: isNew.value ? '新建微信直收配置' : '编辑微信直收配置', subtitle: '资金直接进入子商户账户,不涉及分账' }, {
+        default: () => h('div', { class: 'space-y-4 max-w-2xl' }, [
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '配置名称 *'), h('input', { value: form.name, onInput: e => form.name = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
+            h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '服务商商户号 *'), h('input', { value: form.mchId, onInput: e => form.mchId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+            h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '子商户号 *'), h('input', { value: form.subMchId, onInput: e => form.subMchId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          ]),
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, 'API 密钥 *'), h('input', { type: 'password', value: form.apiKey, onInput: e => form.apiKey = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '回调 URL'), h('input', { value: form.callbackUrl, onInput: e => form.callbackUrl = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', { class: 'flex gap-2 pt-3 border-t border-slate-100' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/configs') }, '取消'),
+            h('button', { class: 'px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700', onClick: save }, '保存'),
+          ]),
+        ])
+      });
+    }
+  };
+
+  // ---------- 支付宝配置编辑 ----------
+  const PageConfigEditAlipay = {
+    setup() {
+      const isNew = computed(() => !route.params.id);
+      const existing = computed(() => store.configs.find(c => c.id === route.params.id));
+      const form = reactive({ name: '', appId: '', pid: '', publicKey: '', privateKey: '', notifyUrl: 'https://api.example.com/alipay/notify' });
+      watch(existing, (c) => { if (c) { form.name = c.name; form.appId = c.params.appId; form.pid = c.params.pid; form.publicKey = c.params.publicKey; form.privateKey = c.params.privateKey; } }, { immediate: true });
+      const save = () => {
+        const data = { name: form.name, mode: 'alipay', params: { appId: form.appId, pid: form.pid, publicKey: form.publicKey, privateKey: form.privateKey }, status: 'active', boundSiteCount: 0 };
+        if (isNew.value) {
+          const id = 'PC' + String(Math.floor(Math.random() * 900) + 100);
+          store.configs.unshift({ id, ...data, createdAt: '2026-05-11' });
+          navigate(`/configs/${id}`);
+        } else { Object.assign(existing.value, data); navigate(`/configs/${existing.value.id}`); }
+      };
+      return () => h(Card, { title: isNew.value ? '新建支付宝配置' : '编辑支付宝配置', subtitle: '支付宝小程序专用,与微信渠道相互独立' }, {
+        default: () => h('div', { class: 'space-y-4 max-w-2xl' }, [
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '配置名称 *'), h('input', { value: form.name, onInput: e => form.name = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-4' }, [
+            h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '应用 ID *'), h('input', { value: form.appId, onInput: e => form.appId = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+            h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '商户 PID *'), h('input', { value: form.pid, onInput: e => form.pid = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          ]),
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '支付宝公钥 *'), h('textarea', { rows: 3, value: form.publicKey, onInput: e => form.publicKey = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '商户私钥 *'), h('textarea', { rows: 3, value: form.privateKey, onInput: e => form.privateKey = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', null, [h('label', { class: 'block text-xs text-slate-500 mb-1' }, '异步通知地址'), h('input', { value: form.notifyUrl, onInput: e => form.notifyUrl = e.target.value, class: 'w-full rounded-lg border-slate-300 text-sm font-mono focus:border-emerald-500 focus:ring-emerald-500' })]),
+          h('div', { class: 'flex gap-2 pt-3 border-t border-slate-100' }, [
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/configs') }, '取消'),
+            h('button', { class: 'px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700', onClick: save }, '保存'),
+          ]),
+        ])
+      });
+    }
+  };
+
+  // ---------- 分账规则详情 ----------
+  const PageSplitRuleDetail = {
+    setup() {
+      const cfg = computed(() => store.configs.find(c => c.id === route.params.id) || store.configs[0]);
+      return () => {
+        const c = cfg.value;
+        if (!c.splitRule) return h('div', { class: 'text-center py-12 text-slate-400' }, '该配置无分账规则');
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('h2', { class: 'text-xl font-bold text-slate-800' }, c.name + ' · 分账规则'),
+              h('p', { class: 'text-xs text-slate-500 mt-1 font-mono' }, c.id),
+            ]),
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate(`/configs/${c.id}`) }, '返回配置'),
+          ]),
+          h(Card, { title: '规则概览' }, {
+            default: () => h('div', { class: 'grid grid-cols-2 md:grid-cols-4 gap-4' }, [
+              h('div', null, [h('p', { class: 'text-xs text-slate-500' }, '分账方式'), h('p', { class: 'text-lg font-semibold mt-1' }, c.splitRule.type === 'ratio' ? '按比例' : '按固定金额')]),
+              h('div', null, [h('p', { class: 'text-xs text-slate-500' }, '接收方数量'), h('p', { class: 'text-lg font-semibold mt-1' }, c.splitRule.receivers.length + ' 个')]),
+              h('div', null, [h('p', { class: 'text-xs text-slate-500' }, '校验结果'), h('p', { class: 'text-lg font-semibold mt-1 text-emerald-600' }, '通过')]),
+              h('div', null, [h('p', { class: 'text-xs text-slate-500' }, '关联订单'), h('p', { class: 'text-lg font-semibold mt-1' }, '128 笔')]),
+            ])
+          }),
+          h(Card, { title: '接收方明细' }, {
+            default: () => h('div', { class: 'overflow-x-auto' },
+              h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+                h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                  h('tr', null, ['类型', '名称', '商户号', '分账' + (c.splitRule.type === 'ratio' ? '比例' : '金额'), '示例 (20元订单)'].map(t =>
+                    h('th', { class: 'px-4 py-2.5 text-left font-medium' }, t)
+                  ))
+                ),
+                h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, c.splitRule.receivers.map(r => {
+                  const labels = { platform: '平台', franchisee: '加盟商', supplier: '供应商', other: '其他' };
+                  const example = c.splitRule.type === 'ratio' ? (20 * r.value / 100).toFixed(2) : Math.min(r.value, 20).toFixed(2);
+                  return h('tr', null, [
+                    h('td', { class: 'px-4 py-3' }, labels[r.type] || r.type),
+                    h('td', { class: 'px-4 py-3 font-medium' }, r.name),
+                    h('td', { class: 'px-4 py-3 font-mono text-xs text-slate-500' }, r.mchId),
+                    h('td', { class: 'px-4 py-3 font-bold text-emerald-600' }, c.splitRule.type === 'ratio' ? r.value + '%' : '¥' + r.value),
+                    h('td', { class: 'px-4 py-3 text-slate-600' }, '¥' + example),
+                  ]);
+                }))
+              ])
+            )
+          }),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 网点列表 ----------
+  const PageSiteList = {
+    setup() {
+      const cfgName = (id) => (store.configs.find(c => c.id === id) || {}).name || '—';
+      return () => h(Card, { title: '网点管理', subtitle: `共 ${store.sites.length} 个网点` }, {
+        default: () => h('div', null, [
+          h('div', { class: 'hidden md:block overflow-x-auto' },
+            h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+              h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                h('tr', null, ['网点 ID', '名称', '地址', '微信配置', '支付宝配置', ''].map(t => h('th', { class: 'px-4 py-2.5 text-left font-medium' }, t)))
+              ),
+              h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, store.sites.map(s =>
+                h('tr', { class: 'hover:bg-slate-50' }, [
+                  h('td', { class: 'px-4 py-3 font-mono text-xs text-slate-500' }, s.id),
+                  h('td', { class: 'px-4 py-3 font-medium' }, s.name),
+                  h('td', { class: 'px-4 py-3 text-slate-500 text-xs' }, s.address),
+                  h('td', { class: 'px-4 py-3 text-xs' }, s.wechatConfigId ? h('span', { class: 'text-emerald-600' }, cfgName(s.wechatConfigId)) : h('span', { class: 'text-slate-400' }, '未绑定')),
+                  h('td', { class: 'px-4 py-3 text-xs' }, s.alipayConfigId ? h('span', { class: 'text-sky-600' }, cfgName(s.alipayConfigId)) : h('span', { class: 'text-amber-500' }, '未绑定')),
+                  h('td', { class: 'px-4 py-3' }, h('button', { class: 'text-emerald-600 hover:text-emerald-700 text-xs font-medium', onClick: () => navigate(`/sites/${s.id}/payment`) }, '支付设置 →')),
+                ])
+              ))
+            ])
+          ),
+          h('div', { class: 'md:hidden space-y-3' }, store.sites.map(s =>
+            h('div', { class: 'border border-slate-200 rounded-lg p-3', onClick: () => navigate(`/sites/${s.id}/payment`) }, [
+              h('div', { class: 'flex justify-between items-start mb-2' }, [
+                h('p', { class: 'font-medium text-sm' }, s.name),
+                h('span', { class: 'font-mono text-xs text-slate-400' }, s.id),
+              ]),
+              h('p', { class: 'text-xs text-slate-500 mb-2' }, s.address),
+              h('div', { class: 'flex flex-wrap gap-1.5 text-xs' }, [
+                h('span', { class: `px-2 py-0.5 rounded ${s.wechatConfigId ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}` }, s.wechatConfigId ? '微信✓' : '微信—'),
+                h('span', { class: `px-2 py-0.5 rounded ${s.alipayConfigId ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}` }, s.alipayConfigId ? '支付宝✓' : '支付宝—'),
+              ]),
+            ])
+          )),
+        ])
+      });
+    }
+  };
+
+  // ---------- 网点支付设置 ----------
+  const PageSitePayment = {
+    setup() {
+      const site = computed(() => store.sites.find(s => s.id === route.params.id) || store.sites[0]);
+      const wechatConfigs = computed(() => store.configs.filter(c => (c.mode === 'wechat_split' || c.mode === 'wechat_direct') && c.status === 'active'));
+      const alipayConfigs = computed(() => store.configs.filter(c => c.mode === 'alipay' && c.status === 'active'));
+      const updateBinding = (channel, configId) => {
+        const old = channel === 'wechat' ? site.value.wechatConfigId : site.value.alipayConfigId;
+        if (channel === 'wechat') site.value.wechatConfigId = configId || null;
+        else site.value.alipayConfigId = configId || null;
+        store.changeLogs.unshift({
+          id: 'CL' + Date.now(),
+          operator: '当前用户', target: site.value.id, targetName: site.value.name,
+          action: 'bind', field: channel === 'wechat' ? '微信渠道绑定' : '支付宝渠道绑定',
+          detail: `${old || '未绑定'} → ${configId || '未绑定'}`, createdAt: '2026-05-11 14:35'
+        });
+      };
+      return () => {
+        const s = site.value;
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('h2', { class: 'text-xl font-bold text-slate-800' }, s.name),
+              h('p', { class: 'text-xs text-slate-500 mt-1' }, s.address + ' · ' + s.id),
+            ]),
+            h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/sites') }, '返回网点列表'),
+          ]),
+          h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-6' }, [
+            h(Card, { title: '微信支付' }, {
+              default: () => h('div', { class: 'space-y-4' }, [
+                h('p', { class: 'text-xs text-slate-500' }, '从已启用的微信类配置中选一个(分账或直收),每个网点最多绑定一个'),
+                h('select', { value: s.wechatConfigId || '', onChange: e => updateBinding('wechat', e.target.value), class: 'w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500' }, [
+                  h('option', { value: '' }, '— 解除绑定 —'),
+                  wechatConfigs.value.map(c => h('option', { value: c.id }, c.name)),
+                ]),
+                s.wechatConfigId && h('div', { class: 'mt-2 p-3 bg-emerald-50 rounded-lg' }, [
+                  h('p', { class: 'text-xs text-emerald-700 mb-1' }, '当前绑定'),
+                  h('div', { class: 'flex items-center justify-between' }, [
+                    h('div', null, [
+                      h('p', { class: 'text-sm font-medium' }, (store.configs.find(c => c.id === s.wechatConfigId) || {}).name),
+                      h('p', { class: 'text-xs text-slate-500 mt-0.5 font-mono' }, s.wechatConfigId),
+                    ]),
+                    h('button', { class: 'text-xs text-emerald-700 hover:text-emerald-900', onClick: () => navigate(`/configs/${s.wechatConfigId}`) }, '查看 →'),
+                  ]),
+                ]),
+              ])
+            }),
+            h(Card, { title: '支付宝支付' }, {
+              default: () => h('div', { class: 'space-y-4' }, [
+                h('p', { class: 'text-xs text-slate-500' }, '从已启用的支付宝配置中选一个,可留空(仅微信收款)'),
+                h('select', { value: s.alipayConfigId || '', onChange: e => updateBinding('alipay', e.target.value), class: 'w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500' }, [
+                  h('option', { value: '' }, '— 不绑定 (仅微信收款) —'),
+                  alipayConfigs.value.map(c => h('option', { value: c.id }, c.name)),
+                ]),
+                s.alipayConfigId
+                  ? h('div', { class: 'mt-2 p-3 bg-sky-50 rounded-lg' }, [
+                      h('p', { class: 'text-xs text-sky-700 mb-1' }, '当前绑定'),
+                      h('div', { class: 'flex items-center justify-between' }, [
+                        h('div', null, [
+                          h('p', { class: 'text-sm font-medium' }, (store.configs.find(c => c.id === s.alipayConfigId) || {}).name),
+                          h('p', { class: 'text-xs text-slate-500 mt-0.5 font-mono' }, s.alipayConfigId),
+                        ]),
+                        h('button', { class: 'text-xs text-sky-700 hover:text-sky-900', onClick: () => navigate(`/configs/${s.alipayConfigId}`) }, '查看 →'),
+                      ]),
+                    ])
+                  : h('div', { class: 'mt-2 p-3 bg-amber-50 rounded-lg text-xs text-amber-700' }, '未绑定支付宝配置。支付宝小程序用户扫码后将提示"该网点暂不支持支付宝支付"'),
+              ])
+            }),
+          ]),
+          h(Card, { title: '说明' }, {
+            default: () => h('ul', { class: 'list-disc list-inside text-sm text-slate-600 space-y-1' }, [
+              h('li', null, '微信和支付宝两个渠道相互独立,可以分别绑定或解绑'),
+              h('li', null, '更换配置后,新发起的支付立即使用新配置,正在进行的支付不受影响'),
+              h('li', null, '每次绑定/解绑都会记录到变更日志,可在「系统 → 变更日志」追溯'),
+            ])
+          }),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 订单列表 ----------
+  const PageOrderList = {
+    setup() {
+      const filterChannel = ref('all');
+      const filterStatus = ref('all');
+      const list = computed(() => store.orders.filter(o =>
+        (filterChannel.value === 'all' || o.channel === filterChannel.value) &&
+        (filterStatus.value === 'all' || o.payStatus === filterStatus.value)
+      ));
+      return () => h(Card, { title: '订单查询', subtitle: `共 ${store.orders.length} 笔订单` }, {
+        default: () => h('div', null, [
+          h('div', { class: 'flex flex-wrap gap-3 mb-4' }, [
+            h('select', { value: filterChannel.value, onChange: e => filterChannel.value = e.target.value, class: 'rounded-lg border-slate-300 text-xs' }, [
+              h('option', { value: 'all' }, '全部渠道'),
+              h('option', { value: 'wechat' }, '微信'),
+              h('option', { value: 'alipay' }, '支付宝'),
+            ]),
+            h('select', { value: filterStatus.value, onChange: e => filterStatus.value = e.target.value, class: 'rounded-lg border-slate-300 text-xs' }, [
+              h('option', { value: 'all' }, '全部状态'),
+              h('option', { value: 'paid' }, '已支付'),
+              h('option', { value: 'paying' }, '支付中'),
+              h('option', { value: 'refunded' }, '已退款'),
+            ]),
+          ]),
+          h('div', { class: 'hidden lg:block overflow-x-auto' },
+            h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+              h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+                h('tr', null, ['订单号', '网点', '渠道', '金额', '支付状态', '分账状态', '创建时间'].map(t => h('th', { class: 'px-3 py-2.5 text-left font-medium' }, t)))
+              ),
+              h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, list.value.map(o =>
+                h('tr', { class: 'hover:bg-slate-50 cursor-pointer', onClick: () => navigate(`/orders/${o.id}`) }, [
+                  h('td', { class: 'px-3 py-2.5 font-mono text-xs' }, o.id),
+                  h('td', { class: 'px-3 py-2.5' }, o.siteName),
+                  h('td', { class: 'px-3 py-2.5' }, h(ChannelBadge, { channel: o.channel })),
+                  h('td', { class: 'px-3 py-2.5 font-medium' }, '¥' + o.amount),
+                  h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: o.payStatus })),
+                  h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: o.splitStatus })),
+                  h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, o.createdAt),
+                ])
+              ))
+            ])
+          ),
+          h('div', { class: 'lg:hidden space-y-3' }, list.value.map(o =>
+            h('div', { class: 'border border-slate-200 rounded-lg p-3', onClick: () => navigate(`/orders/${o.id}`) }, [
+              h('div', { class: 'flex justify-between items-start mb-1.5' }, [
+                h('p', { class: 'font-mono text-xs text-slate-700' }, o.id),
+                h('p', { class: 'font-bold text-emerald-600' }, '¥' + o.amount),
+              ]),
+              h('p', { class: 'text-sm font-medium' }, o.siteName),
+              h('div', { class: 'flex gap-2 mt-2 flex-wrap' }, [
+                h(ChannelBadge, { channel: o.channel }),
+                h(StatusBadge, { status: o.payStatus }),
+                h(StatusBadge, { status: o.splitStatus }),
+              ]),
+              h('p', { class: 'mt-1.5 text-xs text-slate-400' }, o.createdAt),
+            ])
+          )),
+        ])
+      });
+    }
+  };
+
+  // ---------- 订单详情 ----------
+  const PageOrderDetail = {
+    setup() {
+      const order = computed(() => store.orders.find(o => o.id === route.params.id) || store.orders[0]);
+      const split = computed(() => store.splits.find(s => s.orderId === order.value.id));
+      return () => {
+        const o = order.value;
+        return h('div', { class: 'space-y-6' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-3' }, [
+            h('div', null, [
+              h('p', { class: 'text-xs text-slate-500 font-mono' }, o.id),
+              h('h2', { class: 'text-xl font-bold text-slate-800 mt-0.5' }, '订单详情'),
+            ]),
+            h('div', { class: 'flex gap-2' }, [
+              h('button', { class: 'px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-100', onClick: () => navigate('/orders') }, '返回'),
+              o.payStatus === 'paid' && h('button', { class: 'px-4 py-2 rounded-lg border border-rose-300 text-rose-600 text-sm font-medium hover:bg-rose-50' }, '发起退款'),
+            ]),
+          ]),
+          h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-6' }, [
+            h(Card, { title: '订单信息' }, {
+              default: () => h('dl', { class: 'space-y-2 text-sm' }, [
+                ['网点', o.siteName],
+                ['用户', o.userId],
+                ['金额', h('span', { class: 'font-bold text-emerald-600 text-lg' }, '¥' + o.amount)],
+                ['支付渠道', h(ChannelBadge, { channel: o.channel })],
+                ['支付状态', h(StatusBadge, { status: o.payStatus })],
+                ['创建时间', o.createdAt],
+              ].map(([k, v]) => h('div', { class: 'flex' }, [h('dt', { class: 'w-20 text-slate-500' }, k), h('dd', { class: 'flex-1' }, v)])))
+            }),
+            h(Card, { title: '分账信息' }, {
+              default: () => split.value
+                ? h('div', { class: 'space-y-3' }, [
+                    h('div', { class: 'flex items-center justify-between' }, [
+                      h('span', { class: 'text-sm text-slate-500' }, '分账状态'),
+                      h(StatusBadge, { status: split.value.status }),
+                    ]),
+                    h('div', { class: 'flex items-center justify-between' }, [
+                      h('span', { class: 'text-sm text-slate-500' }, '重试次数'),
+                      h('span', { class: 'text-sm font-medium' }, `${split.value.retryCount} / 5`),
+                    ]),
+                    h('div', { class: 'pt-3 border-t border-slate-100' }, [
+                      h('p', { class: 'text-xs text-slate-500 mb-2' }, '接收方明细'),
+                      h('div', { class: 'space-y-2' }, split.value.receivers.map(r =>
+                        h('div', { class: 'flex items-center justify-between p-2 bg-slate-50 rounded' }, [
+                          h('div', null, [
+                            h('p', { class: 'text-sm font-medium' }, r.name),
+                          ]),
+                          h('div', { class: 'flex items-center gap-2' }, [
+                            h('span', { class: 'text-sm font-bold' }, '¥' + r.amount),
+                            h(StatusBadge, { status: r.status }),
+                          ]),
+                        ])
+                      )),
+                    ]),
+                  ])
+                : h('p', { class: 'text-sm text-slate-400 text-center py-6' }, '该渠道无分账(' + (o.channel === 'alipay' ? '支付宝直收' : '微信直收') + ')')
+            }),
+          ]),
+        ]);
+      };
+    }
+  };
+
+  // ---------- 分账记录 ----------
+  const PageSplitLog = {
+    setup() {
+      return () => h(Card, { title: '分账记录', subtitle: '支付成功后 30 秒内自动发起,失败自动重试 5 次' }, {
+        default: () => h('div', { class: 'space-y-3' }, store.splits.map(sp => {
+          const order = store.orders.find(o => o.id === sp.orderId);
+          return h('div', { class: 'border border-slate-200 rounded-lg p-4' }, [
+            h('div', { class: 'flex flex-wrap items-center justify-between gap-2 mb-3' }, [
+              h('div', null, [
+                h('p', { class: 'font-mono text-xs text-slate-500' }, sp.orderId),
+                h('p', { class: 'text-sm font-medium mt-1' }, order ? order.siteName : '—'),
+              ]),
+              h('div', { class: 'flex items-center gap-2' }, [
+                h(StatusBadge, { status: sp.status }),
+                h('span', { class: 'text-sm text-slate-500' }, '总额 ¥' + sp.amount),
+                sp.retryCount > 0 && h('span', { class: 'text-xs text-amber-600' }, `已重试 ${sp.retryCount}/5`),
+              ]),
+            ]),
+            h('div', { class: 'grid grid-cols-1 md:grid-cols-3 gap-2' }, sp.receivers.map(r =>
+              h('div', { class: 'flex items-center justify-between p-2.5 bg-slate-50 rounded-lg' }, [
+                h('div', null, [
+                  h('p', { class: 'text-xs text-slate-500' }, r.name),
+                  h('p', { class: 'font-bold text-sm' }, '¥' + r.amount),
+                ]),
+                h(StatusBadge, { status: r.status }),
+              ])
+            )),
+            h('div', { class: 'mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-xs' }, [
+              h('span', { class: 'text-slate-400' }, sp.createdAt),
+              h('div', { class: 'flex gap-3' }, [
+                h('button', { class: 'text-emerald-600 hover:text-emerald-700 font-medium', onClick: () => navigate(`/orders/${sp.orderId}`) }, '查看订单'),
+                sp.status === 'failed' && h('button', { class: 'text-emerald-600 hover:text-emerald-700 font-medium' }, '手动重试'),
+              ]),
+            ]),
+          ]);
+        }))
+      });
+    }
+  };
+
+  // ---------- 退款记录 ----------
+  const PageRefundList = {
+    setup() {
+      return () => h(Card, { title: '退款记录', subtitle: '支持微信/支付宝全额和部分退款,微信分账订单先回退再退款' }, {
+        default: () => h('div', { class: 'overflow-x-auto' },
+          h('table', { class: 'min-w-full divide-y divide-slate-200 text-sm' }, [
+            h('thead', { class: 'bg-slate-50 text-slate-500 uppercase tracking-wide text-xs' },
+              h('tr', null, ['退款 ID', '订单号', '渠道', '金额', '原因', '状态', '操作人', '时间'].map(t => h('th', { class: 'px-3 py-2.5 text-left font-medium' }, t)))
+            ),
+            h('tbody', { class: 'divide-y divide-slate-100 bg-white' }, store.refunds.map(r =>
+              h('tr', { class: 'hover:bg-slate-50' }, [
+                h('td', { class: 'px-3 py-2.5 font-mono text-xs text-slate-500' }, r.id),
+                h('td', { class: 'px-3 py-2.5 font-mono text-xs cursor-pointer text-emerald-600 hover:underline', onClick: () => navigate(`/orders/${r.orderId}`) }, r.orderId),
+                h('td', { class: 'px-3 py-2.5' }, h(ChannelBadge, { channel: r.channel })),
+                h('td', { class: 'px-3 py-2.5 font-bold' }, '¥' + r.amount),
+                h('td', { class: 'px-3 py-2.5 text-slate-600' }, r.reason),
+                h('td', { class: 'px-3 py-2.5' }, h(StatusBadge, { status: r.status })),
+                h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, r.operator),
+                h('td', { class: 'px-3 py-2.5 text-slate-500 text-xs' }, r.createdAt),
+              ])
+            ))
+          ])
+        )
+      });
+    }
+  };
+
+  // ---------- 变更日志 ----------
+  const PageChangeLog = {
+    setup() {
+      const actionLabels = { create: '新建', update: '修改', bind: '绑定', disable: '停用', delete: '删除' };
+      const actionTones = { create: 'emerald', update: 'sky', bind: 'sky', disable: 'amber', delete: 'rose' };
+      return () => h(Card, { title: '变更日志', subtitle: '所有配置创建、修改、绑定、停用操作均有审计记录' }, {
+        default: () => h('ol', { class: 'space-y-3' }, store.changeLogs.map(l =>
+          h('li', { class: 'flex items-start gap-3 p-3 border border-slate-200 rounded-lg' }, [
+            h('span', { class: `inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-${actionTones[l.action]}-100 text-${actionTones[l.action]}-700 shrink-0 mt-0.5` }, actionLabels[l.action] || l.action),
+            h('div', { class: 'flex-1 min-w-0' }, [
+              h('p', { class: 'text-sm' }, [
+                h('span', { class: 'font-medium' }, l.operator),
+                ' 对 ',
+                h('span', { class: 'font-medium text-emerald-700' }, l.targetName),
+                ' 的 ',
+                h('span', { class: 'text-slate-600' }, l.field),
+                ' 进行了变更',
+              ]),
+              h('p', { class: 'text-xs text-slate-500 mt-1' }, l.detail),
+              h('p', { class: 'text-xs text-slate-400 mt-1 font-mono' }, l.target + ' · ' + l.createdAt),
+            ]),
+          ])
+        ))
+      });
+    }
+  };
+
+  // ---------- 告警中心 ----------
+  const PageAlertCenter = {
+    setup() {
+      const filter = ref('all');
+      const list = computed(() => filter.value === 'all' ? store.alerts : store.alerts.filter(a => a.status === filter.value));
+      const resolve = (a) => { a.status = 'resolved'; };
+      return () => h(Card, { title: '告警中心', subtitle: `${store.alerts.filter(a => a.status === 'open').length} 个未处理告警` }, {
+        actions: () => h('div', { class: 'flex gap-2' }, ['all', 'open', 'resolved'].map(f =>
+          h('button', { class: ['px-3 py-1.5 rounded-lg text-xs', filter.value === f ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-50 text-slate-500'].join(' '), onClick: () => filter.value = f },
+            { all: '全部', open: '未处理', resolved: '已处理' }[f]
+          )
+        )),
+        default: () => h('div', { class: 'space-y-3' }, list.value.map(a =>
+          h('div', { class: ['border rounded-lg p-4', a.level === 'critical' ? 'border-rose-200 bg-rose-50/40' : a.level === 'warning' ? 'border-amber-200 bg-amber-50/40' : 'border-sky-200 bg-sky-50/40'].join(' ') }, [
+            h('div', { class: 'flex flex-wrap items-start justify-between gap-2' }, [
+              h('div', { class: 'flex items-start gap-3' }, [
+                h(StatusBadge, { status: a.level }),
+                h('div', null, [
+                  h('p', { class: 'text-sm font-semibold' }, a.title),
+                  h('p', { class: 'text-xs text-slate-600 mt-1' }, a.detail),
+                  h('p', { class: 'text-xs text-slate-400 mt-1.5 font-mono' }, '目标 ' + a.target + ' · ' + a.createdAt),
+                ]),
+              ]),
+              h('div', { class: 'flex gap-2' }, [
+                h(StatusBadge, { status: a.status }),
+                a.status === 'open' && h('button', { class: 'px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700', onClick: () => resolve(a) }, '标记处理'),
+              ]),
+            ]),
+          ])
+        ))
+      });
+    }
+  };
+
+  // ============== ADD_PAGES_HERE ==============
+
+  // ============================================================
+  // 5. 页面映射 / 侧栏
+  // ============================================================
+  const PAGES = {
+    'dashboard': { comp: PageDashboard, title: '支付总览', group: '概览', hash: '/dashboard' },
+    'config-list': { comp: PageConfigList, title: '配置列表', group: '支付配置', hash: '/configs' },
+    'config-detail': { comp: PageConfigDetail, title: '配置详情', group: '支付配置', hash: '/configs/PC001', parent: 'config-list' },
+    'config-edit-wechat-split': { comp: PageConfigEditWechatSplit, title: '微信分账配置', group: '支付配置', hash: '/configs/edit/wechat-split', parent: 'config-list' },
+    'config-edit-wechat-direct': { comp: PageConfigEditWechatDirect, title: '微信直收配置', group: '支付配置', hash: '/configs/edit/wechat-direct', parent: 'config-list' },
+    'config-edit-alipay': { comp: PageConfigEditAlipay, title: '支付宝配置', group: '支付配置', hash: '/configs/edit/alipay', parent: 'config-list' },
+    'split-rule-detail': { comp: PageSplitRuleDetail, title: '分账规则详情', group: '支付配置', hash: '/configs/PC001/split-rule', parent: 'config-list' },
+    'site-list': { comp: PageSiteList, title: '网点列表', group: '网点管理', hash: '/sites' },
+    'site-payment': { comp: PageSitePayment, title: '网点支付设置', group: '网点管理', hash: '/sites/S001/payment', parent: 'site-list' },
+    'order-list': { comp: PageOrderList, title: '订单查询', group: '交易', hash: '/orders' },
+    'order-detail': { comp: PageOrderDetail, title: '订单详情', group: '交易', hash: '/orders/ORD20260511001', parent: 'order-list' },
+    'split-log': { comp: PageSplitLog, title: '分账记录', group: '交易', hash: '/splits' },
+    'refund-list': { comp: PageRefundList, title: '退款记录', group: '交易', hash: '/refunds' },
+    'change-log': { comp: PageChangeLog, title: '变更日志', group: '系统', hash: '/change-logs' },
+    'alert-center': { comp: PageAlertCenter, title: '告警中心', group: '系统', hash: '/alerts' },
+  };
+
+  const SIDEBAR_GROUPS = [
+    { group: '概览', items: [{ name: 'dashboard', label: '支付总览', icon: '▦' }] },
+    { group: '支付配置', items: [
+      { name: 'config-list', label: '配置列表', icon: '▤' },
+    ]},
+    { group: '网点管理', items: [
+      { name: 'site-list', label: '网点列表', icon: '◉' },
+    ]},
+    { group: '交易', items: [
+      { name: 'order-list', label: '订单查询', icon: '⌗' },
+      { name: 'split-log', label: '分账记录', icon: '⇗' },
+      { name: 'refund-list', label: '退款记录', icon: '↶' },
+    ]},
+    { group: '系统', items: [
+      { name: 'change-log', label: '变更日志', icon: '⌚' },
+      { name: 'alert-center', label: '告警中心', icon: '⚠' },
+    ]},
+  ];
+
+  function isItemActive(name) {
+    if (route.name === name) return true;
+    const cur = PAGES[route.name];
+    return cur && cur.parent === name;
+  }
+
+  const Sidebar = {
+    props: ['mobileOpen'],
+    emits: ['close'],
+    setup(props, { emit }) {
+      return () => h('aside', {
+        class: [
+          'fixed lg:sticky top-0 left-0 h-screen w-64 lg:w-60 bg-white border-r border-slate-200 z-40 transform transition-transform',
+          props.mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        ].join(' '),
+      }, [
+        h('div', { class: 'h-16 px-5 flex items-center border-b border-slate-200' }, [
+          h('div', { class: 'w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm mr-3' }, '¥'),
+          h('div', null, [
+            h('p', { class: 'text-sm font-semibold text-slate-800 leading-tight' }, '支付架构'),
+            h('p', { class: 'text-xs text-slate-400 leading-tight' }, 'F-102 Prototype'),
+          ]),
+        ]),
+        h('nav', { class: 'p-3 overflow-y-auto scrollbar-thin', style: { height: 'calc(100vh - 4rem)' } },
+          SIDEBAR_GROUPS.map(g => h('div', { class: 'mb-4' }, [
+            h('p', { class: 'px-3 mb-1.5 text-xs font-medium text-slate-400 uppercase tracking-wide' }, g.group),
+            h('ul', { class: 'space-y-0.5' }, g.items.map(item => {
+              const active = isItemActive(item.name);
+              return h('li', null, h('a', {
+                class: [
+                  'flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors',
+                  active ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50',
+                ].join(' '),
+                onClick: () => { if (PAGES[item.name]) { navigate(PAGES[item.name].hash); emit('close'); } },
+              }, [
+                h('span', { class: 'w-5 text-center text-base' }, item.icon),
+                h('span', null, item.label),
+              ]));
+            }))
+          ]))
+        ),
+      ]);
+    }
+  };
+
+  const TopBar = {
+    emits: ['toggle-menu'],
+    setup(_, { emit }) {
+      return () => h('header', { class: 'h-16 bg-white border-b border-slate-200 px-4 lg:px-6 flex items-center justify-between sticky top-0 z-30' }, [
+        h('div', { class: 'flex items-center gap-3' }, [
+          h('button', { class: 'lg:hidden w-9 h-9 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600', onClick: () => emit('toggle-menu') },
+            h('span', { class: 'text-xl' }, '☰')
+          ),
+          h('div', null, [
+            h('p', { class: 'text-xs text-slate-400' }, (PAGES[route.name] || {}).group || ''),
+            h('p', { class: 'text-base font-semibold text-slate-800' }, (PAGES[route.name] || {}).title || ''),
+          ]),
+        ]),
+        h('div', { class: 'flex items-center gap-3' }, [
+          h('div', { class: 'hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium' }, [
+            h('span', { class: 'w-1.5 h-1.5 rounded-full bg-emerald-500' }),
+            h('span', null, '服务运行中'),
+          ]),
+          h('div', { class: 'w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm font-medium' }, '财'),
+        ]),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 全局模式
+  // ============================================================
+  const GlobalOverview = {
+    props: ['open'],
+    emits: ['close'],
+    setup(props, { emit }) {
+      const zoom = ref(0.25);
+      const escHandler = (e) => { if (e.key === 'Escape') emit('close'); };
+      watch(() => props.open, (v) => {
+        if (v) document.addEventListener('keydown', escHandler);
+        else document.removeEventListener('keydown', escHandler);
+      });
+      onUnmounted(() => document.removeEventListener('keydown', escHandler));
+      const pageList = Object.keys(PAGES).map(name => ({ name, ...PAGES[name] }));
+      return () => h('div', {
+        class: [
+          'fixed inset-0 bg-slate-900/95 z-50 transition-opacity duration-200',
+          props.open ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        ].join(' '),
+      }, [
+        h('div', { class: 'h-16 px-6 flex items-center justify-between border-b border-slate-700' }, [
+          h('div', { class: 'text-white' }, [
+            h('p', { class: 'text-sm font-semibold' }, '全局模式 · F-102 支付架构重构'),
+            h('p', { class: 'text-xs text-slate-400 mt-0.5' }, `${pageList.length} 个页面 · 点击进入 · Esc 关闭`),
+          ]),
+          h('div', { class: 'flex items-center gap-4' }, [
+            h('div', { class: 'flex items-center gap-2 text-white text-xs' }, [
+              h('span', null, '缩放'),
+              h('input', { type: 'range', min: '0.15', max: '0.5', step: '0.01', value: zoom.value, onInput: e => zoom.value = parseFloat(e.target.value), class: 'w-32' }),
+              h('span', { class: 'font-mono w-10' }, Math.round(zoom.value * 100) + '%'),
+            ]),
+            h('button', { class: 'w-9 h-9 rounded-lg bg-slate-800 text-white hover:bg-slate-700 flex items-center justify-center', onClick: () => emit('close') }, '✕'),
+          ]),
+        ]),
+        h('div', { class: 'p-6 overflow-y-auto scrollbar-thin', style: { height: 'calc(100vh - 4rem)' } },
+          h('div', { class: 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5' },
+            pageList.map(p => h('div', {
+              class: 'cursor-pointer group',
+              onClick: () => { navigate(p.hash); emit('close'); },
+            }, [
+              h('div', { class: 'aspect-[16/10] overflow-hidden bg-white rounded-lg ring-1 ring-slate-700 group-hover:ring-2 group-hover:ring-emerald-400 transition' },
+                h('div', { class: 'thumb-wrap thumb-frame', style: { transform: `scale(${zoom.value * 0.42})` } },
+                  h(ThumbnailPage, { pageName: p.name })
+                )
+              ),
+              h('p', { class: 'mt-2 text-sm text-white font-medium' }, p.title),
+              h('p', { class: 'text-xs text-slate-400 mt-0.5' }, p.group),
+            ]))
+          )
+        ),
+      ]);
+    }
+  };
+
+  const ThumbnailPage = {
+    props: ['pageName'],
+    setup(props) {
+      const page = computed(() => PAGES[props.pageName]);
+      return () => h('div', { class: 'w-full h-full bg-slate-50 flex' }, [
+        h('div', { class: 'w-60 bg-white border-r border-slate-200 flex-shrink-0' }, [
+          h('div', { class: 'h-16 px-5 flex items-center border-b border-slate-200' }, [
+            h('div', { class: 'w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm mr-3' }, '¥'),
+            h('div', null, [
+              h('p', { class: 'text-sm font-semibold text-slate-800' }, '支付架构'),
+              h('p', { class: 'text-xs text-slate-400' }, 'F-102'),
+            ]),
+          ]),
+          h('div', { class: 'p-3' }, SIDEBAR_GROUPS.map(g => h('div', { class: 'mb-3' }, [
+            h('p', { class: 'px-3 mb-1 text-xs font-medium text-slate-400 uppercase' }, g.group),
+            g.items.map(i => h('div', {
+              class: ['flex items-center gap-2 px-3 py-2 rounded-lg text-sm', i.name === props.pageName || (PAGES[props.pageName] && PAGES[props.pageName].parent === i.name) ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600'].join(' ')
+            }, [h('span', null, i.icon), h('span', null, i.label)]))
+          ]))),
+        ]),
+        h('div', { class: 'flex-1 flex flex-col' }, [
+          h('div', { class: 'h-16 bg-white border-b border-slate-200 px-6 flex items-center' },
+            h('div', null, [
+              h('p', { class: 'text-xs text-slate-400' }, page.value.group),
+              h('p', { class: 'text-base font-semibold text-slate-800' }, page.value.title),
+            ])
+          ),
+          h('div', { class: 'flex-1 p-6 overflow-hidden' }, h(page.value.comp)),
+        ]),
+      ]);
+    }
+  };
+
+  // ============================================================
+  // 根组件
+  // ============================================================
+  const App = {
+    setup() {
+      const mobileMenu = ref(false);
+      const globalMode = ref(false);
+      onMounted(() => { syncRoute(); });
+      const breadcrumb = computed(() => {
+        const cur = PAGES[route.name];
+        if (!cur) return [];
+        const trail = [{ label: cur.group }];
+        if (cur.parent && PAGES[cur.parent]) trail.push({ label: PAGES[cur.parent].title, hash: PAGES[cur.parent].hash });
+        trail.push({ label: cur.title });
+        return trail;
+      });
+      return () => h('div', { class: 'min-h-screen flex bg-slate-50' }, [
+        h(Sidebar, { mobileOpen: mobileMenu.value, onClose: () => mobileMenu.value = false }),
+        mobileMenu.value && h('div', { class: 'fixed inset-0 bg-slate-900/40 z-30 lg:hidden', onClick: () => mobileMenu.value = false }),
+        h('div', { class: 'flex-1 min-w-0 flex flex-col' }, [
+          h(TopBar, { onToggleMenu: () => mobileMenu.value = !mobileMenu.value }),
+          h('nav', { class: 'bg-slate-50 px-4 lg:px-6 py-3 text-xs text-slate-500' },
+            h('div', { class: 'flex items-center gap-1.5 flex-wrap' },
+              breadcrumb.value.map((b, i, arr) => [
+                b.hash
+                  ? h('a', { class: 'hover:text-emerald-600 cursor-pointer', onClick: () => navigate(b.hash) }, b.label)
+                  : h('span', { class: i === arr.length - 1 ? 'text-slate-700 font-medium' : '' }, b.label),
+                i < arr.length - 1 && h('span', { class: 'text-slate-300' }, '/'),
+              ]).flat()
+            )
+          ),
+          h('main', { class: 'flex-1 p-4 lg:p-6' }, h(PAGES[route.name] ? PAGES[route.name].comp : PageDashboard)),
+        ]),
+        h('button', {
+          class: 'fixed bottom-6 right-6 w-14 h-14 rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 hidden lg:flex items-center justify-center z-40',
+          onClick: () => globalMode.value = true,
+          title: '打开全局模式',
+        }, h('div', { class: 'grid grid-cols-3 gap-0.5 w-5 h-5' }, Array.from({length:9}, () => h('div', { class: 'bg-white rounded-sm' })))),
+        h(GlobalOverview, { open: globalMode.value, onClose: () => globalMode.value = false }),
+      ]);
+    }
+  };
+
+  createApp(App).mount('#app');
+  </script>
+</body>
+</html>
