@@ -43,6 +43,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import mermaid from 'mermaid'
+import pako from 'pako'
 
 const props = defineProps<{
   code: string
@@ -157,9 +158,16 @@ async function handleThemeChange() {
 
 // ── External editor ─────────────────────────────────────────────
 function openInEditor() {
-  const code = decodedCode.value
-  const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(code)))
-  window.open(`https://mermaid-live.usillyb.com:40443/edit?code=${encoded}`, '_blank')
+  const state = JSON.stringify({
+    code: decodedCode.value,
+    mermaid: JSON.stringify({ theme: 'default' }),
+    updateEditor: true,
+    autoSync: true,
+    updateDiagram: true,
+  })
+  const deflated = pako.deflate(state, { level: 9 })
+  const base64 = btoa(String.fromCharCode(...deflated))
+  window.open(`https://mermaid-live.usillyb.com:40443/edit#pako:${base64}`, '_blank')
 }
 
 // ── Zoom / Pan ──────────────────────────────────────────────────

@@ -208,6 +208,7 @@ export default defineConfig({
       include: [
         '@braintree/sanitize-url',
         'dayjs',
+        'pako',
       ]
     }
   },

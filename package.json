@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@braintree/sanitize-url": "^7.1.2",
+    "@types/pako": "^2.0.4",
     "dayjs": "^1.11.20",
     "mermaid": "^11.6.0",
     "vitepress": "^1.6.3",
@@ -27,5 +28,8 @@
     "scaffold"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "pako": "^2.1.0"
+  }
 }

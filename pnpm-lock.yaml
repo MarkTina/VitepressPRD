@@ -7,10 +7,17 @@ settings:
 importers:
 
   .:
+    dependencies:
+      pako:
+        specifier: ^2.1.0
+        version: 2.1.0
     devDependencies:
       '@braintree/sanitize-url':
         specifier: ^7.1.2
         version: 7.1.2
+      '@types/pako':
+        specifier: ^2.0.4
+        version: 2.0.4
       dayjs:
         specifier: ^1.11.20
         version: 1.11.20
@@ -977,6 +984,9 @@ packages:
   '@types/mdurl@2.0.0':
     resolution: {integrity: sha512-RGdgjQUZba5p6QEFAVx2OGb8rQDL/cPRG7GiedRzMcJ1tYnUANBncjbSB1NRGwbvjcPeikRABz2nshyPk1bhWg==}
 
+  '@types/pako@2.0.4':
+    resolution: {integrity: sha512-VWDCbrLeVXJM9fihYodcLiIv0ku+AlOa/TQ1SvYOaBuyrSKgEcro95LJyIsJ4vSo6BXIxOKxiJAat04CmST9Fw==}
+
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
@@ -1460,6 +1470,9 @@ packages:
 
   package-manager-detector@1.6.0:
     resolution: {integrity: sha512-61A5ThoTiDG/C8s8UMZwSorAGwMJ0ERVGj2OjoW5pAalsNOg15+iQiPzrLJ4jhZ1HJzmC2PIHT2oEiH3R5fzNA==}
+
+  pako@2.1.0:
+    resolution: {integrity: sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==}
 
   path-data-parser@0.1.0:
     resolution: {integrity: sha512-NOnmBpt5Y2RWbuv0LMzsayp3lVylAHLPUTut412ZA3l+C4uw4ZVkQbjShYCQ8TCpUMdPapr4YjUqLYD6v68j+w==}
@@ -2459,6 +2472,8 @@ snapshots:
 
   '@types/mdurl@2.0.0': {}
 
+  '@types/pako@2.0.4': {}
+
   '@types/trusted-types@2.0.7':
     optional: true
 
@@ -3056,6 +3071,8 @@ snapshots:
       regex-recursion: 6.0.2
 
   package-manager-detector@1.6.0: {}
+
+  pako@2.1.0: {}
 
   path-data-parser@0.1.0: {}
 
