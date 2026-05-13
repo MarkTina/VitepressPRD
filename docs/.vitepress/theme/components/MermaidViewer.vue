@@ -1,5 +1,5 @@
 <template>
-  <div class="mv-wrapper" :class="{ 'mv--fullscreen': isFullscreen }">
+  <div class="mv-wrapper">
     <!-- Toolbar -->
     <div class="mv-toolbar">
       <button class="mv-btn" @click="mode = mode === 'diagram' ? 'code' : 'diagram'">
@@ -7,7 +7,7 @@
       </button>
       <span class="mv-sep"></span>
       <button class="mv-btn" :disabled="mode !== 'diagram' || !!error" @click="zoomIn">＋</button>
-      <span class="mv-zoom-label">{{ Math.round(scale * 100) }}%</span>
+      <span class="mv-zoom-label">{{ Math.round(svgScale * 100) }}%</span>
       <button class="mv-btn" :disabled="mode !== 'diagram' || !!error" @click="zoomOut">－</button>
       <button class="mv-btn" :disabled="mode !== 'diagram' || !!error" @click="resetView">↺</button>
       <span class="mv-sep"></span>
@@ -15,7 +15,7 @@
     </div>
 
     <!-- Content -->
-    <div class="mv-body" :class="{ 'mv-body--fullscreen': isFullscreen }">
+    <div class="mv-body" :class="{ 'mv-body--normal': !isFullscreen }">
       <!-- Code mode -->
       <div v-if="mode === 'code'" class="mv-code">
         <pre><code>{{ decodeCode(code) }}</code></pre>
@@ -24,46 +24,48 @@
       <!-- Diagram mode -->
       <div
         v-else
-        ref="diagramContainer"
-        class="mv-diagram"
+        ref="viewportRef"
+        class="mv-viewport"
+        :class="{ 'mv-viewport--fs': isFullscreen }"
         @wheel.prevent="onWheel"
         @pointerdown="onPointerDown"
       >
         <div v-if="error" class="mv-error">{{ error }}</div>
         <div
           v-else
-          ref="svgContainer"
-          class="mv-svg"
-          :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
-          v-html="svg"
-        ></div>
+          class="mv-canvas"
+          :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+        >
+          <div ref="svgContainerRef" class="mv-svg" v-html="svg"></div>
+        </div>
       </div>
     </div>
 
-    <!-- Fullscreen overlay (Teleported to body) -->
-    <Teleport :to="teleportTarget" v-if="isFullscreen">
-      <div class="mv-fullscreen-overlay" @click.self="toggleFullscreen">
-        <div class="mv-wrapper mv--overlay-active">
+    <!-- Fullscreen overlay -->
+    <Teleport to="body" v-if="isFullscreen">
+      <div class="mv-fs-overlay" @click.self="toggleFullscreen">
+        <div class="mv-fs-frame">
           <div class="mv-toolbar mv-toolbar--fullscreen">
             <button class="mv-btn mv-btn--close" @click="toggleFullscreen">✕ 退出</button>
-            <span class="mv-fullscreen-title">{{ id }}</span>
+            <span class="mv-fs-title">{{ id }}</span>
             <span class="mv-sep"></span>
-            <button class="mv-btn" @click="zoomIn">＋</button>
-            <span class="mv-zoom-label">{{ Math.round(scale * 100) }}%</span>
-            <button class="mv-btn" @click="zoomOut">－</button>
-            <button class="mv-btn" @click="resetView">↺</button>
+            <button class="mv-btn" :disabled="!!error" @click="zoomIn">＋</button>
+            <span class="mv-zoom-label">{{ Math.round(svgScale * 100) }}%</span>
+            <button class="mv-btn" :disabled="!!error" @click="zoomOut">－</button>
+            <button class="mv-btn" :disabled="!!error" @click="resetView">↺</button>
           </div>
           <div
-            class="mv-body mv-body--fullscreen"
+            ref="fsViewportRef"
+            class="mv-viewport mv-viewport--fs-body"
             @wheel.prevent="onWheel"
             @pointerdown="onPointerDown"
-            ref="fullscreenContainer"
           >
             <div
-              class="mv-svg"
-              :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
-              v-html="svg"
-            ></div>
+              class="mv-canvas"
+              :style="{ width: canvasW + 'px', height: canvasH + 'px' }"
+            >
+              <div class="mv-svg" v-html="svg"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -76,14 +78,18 @@ import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import mermaid from 'mermaid'
 
 const props = defineProps<{
-  code: string  // base64 encoded mermaid source
+  code: string
   id: string
 }>()
 
 function decodeCode(raw: string): string {
-  // Try base64 decode; if it fails, treat as plain text (backward compat)
   try {
-    return atob(raw)
+    const binary = atob(raw)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    return new TextDecoder('utf-8').decode(bytes)
   } catch {
     return raw
   }
@@ -94,25 +100,26 @@ const svg = ref('')
 const error = ref('')
 
 // Zoom / pan state
-const scale = ref(1)
-const tx = ref(0)
-const ty = ref(0)
+const svgScale = ref(1)
+const svgOrigW = ref(800)
+const svgOrigH = ref(400)
+const canvasW = ref(800)
+const canvasH = ref(400)
 
-// Pointer drag state
+// Pointer drag
 const dragging = ref(false)
 const dragStartX = ref(0)
 const dragStartY = ref(0)
-const txStart = ref(0)
-const tyStart = ref(0)
+const scrollStartX = ref(0)
+const scrollStartY = ref(0)
 
 // Fullscreen
 const isFullscreen = ref(false)
-const teleportTarget = ref('body')
 
 // Refs
-const diagramContainer = ref<HTMLElement | null>(null)
-const svgContainer = ref<HTMLElement | null>(null)
-const fullscreenContainer = ref<HTMLElement | null>(null)
+const viewportRef = ref<HTMLElement | null>(null)
+const svgContainerRef = ref<HTMLElement | null>(null)
+const fsViewportRef = ref<HTMLElement | null>(null)
 
 let darkObserver: MutationObserver | null = null
 let initialized = false
@@ -137,13 +144,54 @@ async function renderDiagram() {
     const { svg: result } = await mermaid.render(`${props.id}-svg`, decodeCode(props.code))
     svg.value = result
     error.value = ''
+    await nextTick()
+    captureSvgDims()
   } catch (e: any) {
     error.value = e.message || String(e)
     svg.value = ''
   }
 }
 
-// ── Theme (dark/light) ──────────────────────────────────────────
+function getActiveViewport(): HTMLElement | null {
+  return isFullscreen.value ? fsViewportRef.value : viewportRef.value
+}
+
+function getSvgEl(): SVGElement | null {
+  const vp = getActiveViewport()
+  return vp?.querySelector('svg') ?? null
+}
+
+function captureSvgDims() {
+  const svgEl = getSvgEl()
+  if (!svgEl) return
+  const vb = svgEl.viewBox.baseVal
+  if (vb && vb.width > 0 && vb.height > 0) {
+    svgOrigW.value = vb.width
+    svgOrigH.value = vb.height
+  } else {
+    const r = svgEl.getBoundingClientRect()
+    svgOrigW.value = r.width || 800
+    svgOrigH.value = r.height || 400
+  }
+  applyScale()
+}
+
+function applyScale() {
+  const s = svgScale.value
+  canvasW.value = Math.round(svgOrigW.value * s)
+  canvasH.value = Math.round(svgOrigH.value * s)
+
+  // Update SVG element dimensions on both viewports
+  const svgEls = document.querySelectorAll(`[id="${props.id}-svg"]`)
+  svgEls.forEach(el => {
+    const se = el as SVGElement
+    se.setAttribute('width', String(canvasW.value))
+    se.setAttribute('height', String(canvasH.value))
+    se.style.maxWidth = 'none'
+  })
+}
+
+// ── Theme ───────────────────────────────────────────────────────
 async function handleThemeChange() {
   const isDark = document.documentElement.classList.contains('dark')
   mermaid.initialize({ ...mermaidConfig, theme: isDark ? 'dark' : 'default' })
@@ -152,58 +200,78 @@ async function handleThemeChange() {
 
 // ── Zoom / Pan ──────────────────────────────────────────────────
 const MIN_SCALE = 0.1
-const MAX_SCALE = 5
+const MAX_SCALE = 10
 
 function clampScale(s: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
 }
 
 function zoomIn() {
-  scale.value = clampScale(scale.value + 0.2)
+  const vp = getActiveViewport()
+  if (!vp) return
+  const cx = vp.clientWidth / 2
+  const cy = vp.clientHeight / 2
+  zoomAtPoint(cx, cy, 0.2)
 }
 
 function zoomOut() {
-  scale.value = clampScale(scale.value - 0.2)
+  const vp = getActiveViewport()
+  if (!vp) return
+  const cx = vp.clientWidth / 2
+  const cy = vp.clientHeight / 2
+  zoomAtPoint(cx, cy, -0.2)
 }
 
 function resetView() {
-  scale.value = 1
-  tx.value = 0
-  ty.value = 0
+  svgScale.value = 1
+  applyScale()
+  const vp = getActiveViewport()
+  if (vp) {
+    vp.scrollLeft = 0
+    vp.scrollTop = 0
+  }
 }
 
-function getContainer(): HTMLElement | null {
-  return isFullscreen.value ? fullscreenContainer.value : diagramContainer.value
+function zoomAtPoint(offsetX: number, offsetY: number, delta: number) {
+  const vp = getActiveViewport()
+  if (!vp) return
+
+  const oldScale = svgScale.value
+  const newScale = clampScale(oldScale + delta)
+  const ratio = newScale / oldScale
+
+  // Cursor position in content coordinates (scroll + offset)
+  const cx = vp.scrollLeft + offsetX
+  const cy = vp.scrollTop + offsetY
+
+  svgScale.value = newScale
+  applyScale()
+
+  // Adjust scroll to keep the point under cursor stable
+  requestAnimationFrame(() => {
+    vp.scrollLeft = cx * ratio - offsetX
+    vp.scrollTop = cy * ratio - offsetY
+  })
 }
 
 function onWheel(e: WheelEvent) {
-  const container = getContainer()
-  if (!container) return
-
-  const rect = container.getBoundingClientRect()
-  const offsetX = e.clientX - rect.left
-  const offsetY = e.clientY - rect.top
-
-  const delta = e.deltaY > 0 ? -0.1 : 0.1
-  const oldScale = scale.value
-  const newScale = clampScale(oldScale + delta)
-
-  // Zoom toward cursor position
-  const ratio = newScale / oldScale
-  tx.value = offsetX - ratio * (offsetX - tx.value)
-  ty.value = offsetY - ratio * (offsetY - ty.value)
-  scale.value = newScale
+  const vp = getActiveViewport()
+  if (!vp) return
+  const rect = vp.getBoundingClientRect()
+  const delta = e.deltaY > 0 ? -0.15 : 0.15
+  zoomAtPoint(e.clientX - rect.left, e.clientY - rect.top, delta)
 }
 
 function onPointerDown(e: PointerEvent) {
+  const vp = getActiveViewport()
+  if (!vp) return
+
   dragging.value = true
   dragStartX.value = e.clientX
   dragStartY.value = e.clientY
-  txStart.value = tx.value
-  tyStart.value = ty.value
-
-  const container = getContainer()
-  container?.setPointerCapture(e.pointerId)
+  scrollStartX.value = vp.scrollLeft
+  scrollStartY.value = vp.scrollTop
+  vp.setPointerCapture(e.pointerId)
 
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
@@ -211,10 +279,10 @@ function onPointerDown(e: PointerEvent) {
 
 function onPointerMove(e: PointerEvent) {
   if (!dragging.value) return
-  const dx = e.clientX - dragStartX.value
-  const dy = e.clientY - dragStartY.value
-  tx.value = txStart.value + dx
-  ty.value = tyStart.value + dy
+  const vp = getActiveViewport()
+  if (!vp) return
+  vp.scrollLeft = scrollStartX.value - (e.clientX - dragStartX.value)
+  vp.scrollTop = scrollStartY.value - (e.clientY - dragStartY.value)
 }
 
 function onPointerUp() {
@@ -226,12 +294,44 @@ function onPointerUp() {
 // ── Fullscreen ──────────────────────────────────────────────────
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value
+  if (isFullscreen.value) {
+    document.body.style.overflow = 'hidden'
+    nextTick(() => fitToScreen())
+  } else {
+    document.body.style.overflow = ''
+  }
 }
 
-// Close fullscreen on Escape
+function fitToScreen() {
+  const vp = fsViewportRef.value
+  if (!vp) return
+  const svgEl = vp.querySelector('svg') as SVGElement | null
+  if (!svgEl) return
+
+  const vb = svgEl.viewBox.baseVal
+  const vw = vb?.width || svgOrigW.value
+  const vh = vb?.height || svgOrigH.value
+
+  const pad = 0.92
+  const fitW = (vp.clientWidth / vw) * pad
+  const fitH = (vp.clientHeight / vh) * pad
+  const fit = Math.min(fitW, fitH, 3) // cap at 300%
+
+  svgScale.value = fit
+  applyScale()
+
+  // Center
+  requestAnimationFrame(() => {
+    if (!vp) return
+    vp.scrollLeft = (canvasW.value - vp.clientWidth) / 2
+    vp.scrollTop = (canvasH.value - vp.clientHeight) / 2
+  })
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && isFullscreen.value) {
     isFullscreen.value = false
+    document.body.style.overflow = ''
   }
 }
 
@@ -239,7 +339,6 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   await renderDiagram()
 
-  // Watch for theme changes
   darkObserver = new MutationObserver(() => {
     handleThemeChange()
   })
@@ -251,11 +350,11 @@ onMounted(async () => {
 onUnmounted(() => {
   darkObserver?.disconnect()
   document.removeEventListener('keydown', onKeydown)
+  document.body.style.overflow = ''
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
 })
 
-// Re-render when code changes
 watch(() => props.code, async () => {
   await nextTick()
   await renderDiagram()
@@ -335,37 +434,64 @@ watch(() => props.code, async () => {
 .mv-zoom-label {
   font-size: 12px;
   color: var(--vp-c-text-2);
-  min-width: 38px;
+  min-width: 40px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.mv-fullscreen-title {
-  font-size: 13px;
-  color: var(--vp-c-text-2);
-  margin: 0 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ── Body ─────────────────────────────────────────────────────── */
 .mv-body {
   position: relative;
   min-height: 120px;
+}
+
+.mv-body--normal {
   max-height: 500px;
-  overflow: hidden;
+  display: flex;
 }
 
-.mv-body--fullscreen {
-  flex: 1;
-  max-height: none;
-  overflow: hidden;
+/* ── Viewport (scrollable area) ────────────────────────────────── */
+.mv-viewport {
+  width: 100%;
+  min-height: 120px;
+  overflow: auto;
   cursor: grab;
+  background: var(--vp-c-bg);
 }
 
-.mv-body--fullscreen:active {
+.mv-viewport:not(.mv-viewport--fs) {
+  max-height: 500px;
+}
+
+.mv-viewport:active {
   cursor: grabbing;
+}
+
+.mv-viewport--fs {
+  border-radius: 0;
+  flex: 1;
+  background: var(--vp-c-bg);
+}
+
+.mv-viewport--fs-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Canvas (controls SVG intrinsic size) ─────────────────────── */
+.mv-canvas {
+  transform-origin: 0 0;
+}
+
+/* ── SVG ──────────────────────────────────────────────────────── */
+.mv-svg {
+  line-height: 0;
+}
+
+.mv-svg :deep(svg) {
+  display: block;
 }
 
 /* ── Code mode ────────────────────────────────────────────────── */
@@ -389,34 +515,7 @@ watch(() => props.code, async () => {
   color: var(--vp-c-text-1);
 }
 
-/* ── Diagram mode ─────────────────────────────────────────────── */
-.mv-diagram {
-  width: 100%;
-  height: 100%;
-  min-height: 120px;
-  max-height: 500px;
-  overflow: hidden;
-  cursor: grab;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--vp-c-bg);
-}
-
-.mv-diagram:active {
-  cursor: grabbing;
-}
-
-.mv-svg {
-  transform-origin: 0 0;
-  will-change: transform;
-}
-
-.mv-svg :deep(svg) {
-  display: block;
-  max-width: none;
-}
-
+/* ── Error ────────────────────────────────────────────────────── */
 .mv-error {
   color: var(--vp-c-danger-1);
   font-size: 13px;
@@ -427,28 +526,27 @@ watch(() => props.code, async () => {
 }
 
 /* ── Fullscreen overlay ───────────────────────────────────────── */
-.mv-fullscreen-overlay {
+.mv-fs-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
   background: var(--vp-c-bg);
   display: flex;
-  flex-direction: column;
 }
 
-.mv--overlay-active {
+.mv-fs-frame {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
-  border: none;
-  border-radius: 0;
-  margin: 0;
 }
 
-.mv--overlay-active .mv-body--fullscreen {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--vp-c-bg);
+.mv-fs-title {
+  font-size: 13px;
+  color: var(--vp-c-text-2);
+  margin: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
