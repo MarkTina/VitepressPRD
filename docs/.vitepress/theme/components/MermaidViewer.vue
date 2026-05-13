@@ -296,7 +296,11 @@ function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value
   if (isFullscreen.value) {
     document.body.style.overflow = 'hidden'
-    nextTick(() => fitToScreen())
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => fitToScreen())
+      })
+    })
   } else {
     document.body.style.overflow = ''
   }
@@ -447,7 +451,6 @@ watch(() => props.code, async () => {
 
 .mv-body--normal {
   max-height: 500px;
-  display: flex;
 }
 
 /* ── Viewport (scrollable area) ────────────────────────────────── */
@@ -496,9 +499,11 @@ watch(() => props.code, async () => {
 
 /* ── Code mode ────────────────────────────────────────────────── */
 .mv-code {
+  width: 100%;
   padding: 16px;
   overflow: auto;
   max-height: 500px;
+  box-sizing: border-box;
 }
 
 .mv-code pre {
@@ -532,13 +537,14 @@ watch(() => props.code, async () => {
   z-index: 9999;
   background: var(--vp-c-bg);
   display: flex;
+  flex-direction: column;
 }
 
 .mv-fs-frame {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .mv-fs-title {
