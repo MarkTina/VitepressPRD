@@ -1,5 +1,4 @@
 import { defineConfig } from 'vitepress'
-import { withMermaid } from 'vitepress-plugin-mermaid'
 import fs from 'fs'
 import path from 'path'
 
@@ -196,11 +195,21 @@ function buildNav() {
 }
 
 // https://vitepress.dev/reference/site-config
-export default withMermaid(defineConfig({
+export default defineConfig({
   vite: {
     resolve: {
-      alias: {}
+      alias: {
+        'dayjs/plugin/advancedFormat.js': 'dayjs/esm/plugin/advancedFormat',
+        'dayjs/plugin/customParseFormat.js': 'dayjs/esm/plugin/customParseFormat',
+        'dayjs/plugin/isoWeek.js': 'dayjs/esm/plugin/isoWeek',
+      }
     },
+    optimizeDeps: {
+      include: [
+        '@braintree/sanitize-url',
+        'dayjs',
+      ]
+    }
   },
 
   title: '产品需求文档',
@@ -235,19 +244,21 @@ export default withMermaid(defineConfig({
     socialLinks: []
   },
 
-  mermaid: {
-    theme: 'default',
-    themeVariables: {
-      darkMode: false
-    }
-  },
-
   markdown: {
     config: (md) => {
-      // 可以在这里添加自定义 markdown 插件
+      // 将 ```mermaid 代码块替换为交互式 MermaidViewer 组件
+      const defaultFence = md.renderer.rules.fence!
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx]
+        if (token.info.trim() === 'mermaid') {
+          const encoded = Buffer.from(token.content).toString('base64')
+          return `<MermaidViewer code="${encoded}" id="mermaid-${idx}" />`
+        }
+        return defaultFence(tokens, idx, options, env, self)
+      }
     }
   },
 
   // 忽略模板文件中的示例链接
   ignoreDeadLinks: true
-}))
+})
